@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -108,6 +109,14 @@ class Config:
     SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
     SESSION_COOKIE_HTTPONLY = os.environ.get('SESSION_COOKIE_HTTPONLY', 'true').lower() == 'true'
     SESSION_COOKIE_SAMESITE = os.environ.get('SESSION_COOKIE_SAMESITE', 'Lax')
+    
+    # Session Timeout Configuration (in seconds)
+    # Default: 30 minutes (1800 seconds) - can be overridden via environment variable
+    SESSION_TIMEOUT = int(os.environ.get('SESSION_TIMEOUT', 1800))  # 30 minutes
+    PERMANENT_SESSION_LIFETIME = timedelta(seconds=SESSION_TIMEOUT)
+    
+    # Session Cookie Max Age (should match PERMANENT_SESSION_LIFETIME)
+    SESSION_COOKIE_MAX_AGE = SESSION_TIMEOUT
     
     # CSRF Protection Configuration
     WTF_CSRF_ENABLED = True

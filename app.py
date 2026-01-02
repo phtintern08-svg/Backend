@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask import Flask, request, jsonify, send_from_directory, send_file, session
 from datetime import datetime, timedelta
 import os
 import json
@@ -173,6 +173,15 @@ def get_otp_recipient():
     # Fallback to IP address if recipient not found
     return get_remote_address()
 
+# Session Timeout Management
+@app.before_request
+def check_session_timeout():
+    """Check and handle session timeout before each request"""
+    # Make session permanent so it respects PERMANENT_SESSION_LIFETIME
+    if 'user_id' in session:
+        session.permanent = True
+    # Flask will automatically expire sessions based on PERMANENT_SESSION_LIFETIME
+
 # Request Logging Middleware
 @app.before_request
 def log_request_start():
@@ -258,8 +267,22 @@ if Config.ENV == 'production':
 
 @app.route('/favicon.ico')
 def favicon():
-    return send_from_directory(os.path.join(app.root_path, '../Frontend/apparels.impromptuindian.com/images'),
-                               'favicon.ico', mimetype='image/vnd.microsoft.icon')
+    """Serve favicon.ico file"""
+    try:
+        # Use the static folder path which is already configured
+        favicon_path = os.path.join(app.static_folder, 'images', 'favicon.ico')
+        if os.path.exists(favicon_path):
+            return send_file(favicon_path, mimetype='image/vnd.microsoft.icon')
+        else:
+            # Fallback: try alternative path
+            alt_path = os.path.join(BASE_DIR, '../Frontend/apparels.impromptuindian.com/images/favicon.ico')
+            if os.path.exists(alt_path):
+                return send_file(alt_path, mimetype='image/vnd.microsoft.icon')
+            # Return 204 No Content if favicon doesn't exist (browser will stop requesting)
+            return '', 204
+    except Exception as e:
+        # Return 204 No Content on any error (prevents repeated requests)
+        return '', 204
 
 # Validate environment variables on startup - PRODUCTION ONLY
 from validate_env import validate_environment

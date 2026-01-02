@@ -55,12 +55,13 @@ OPTIONAL_VARS = [
     'DEFAULT_ADMIN_USERNAME',
     'DEFAULT_ADMIN_PASSWORD',
     'SENTRY_DSN',
-    'MSG91_AUTHKEY',  # Optional - for MSG91 SMS API
-    'MSG91_SENDER_ID',  # Optional - for MSG91 SMS API (defaults to IMPRTU)
-    'MSG91_ROUTE',  # Optional - MSG91 route (1=Promotional, 4=Transactional, default: 4)
-    'MSG91_DLT_TE_ID',  # Optional - DLT Template ID for MSG91
-    'MSG91_WIDGET_ID',  # Optional - for MSG91 OTP widget
-    'MSG91_TOKEN_AUTH',  # Optional - for MSG91 OTP widget
+    # MSG91 Configuration - DISABLED
+    # 'MSG91_AUTHKEY',  # Optional - for MSG91 SMS API
+    # 'MSG91_SENDER_ID',  # Optional - for MSG91 SMS API (defaults to IMPRTU)
+    # 'MSG91_ROUTE',  # Optional - MSG91 route (1=Promotional, 4=Transactional, default: 4)
+    # 'MSG91_DLT_TE_ID',  # Optional - DLT Template ID for MSG91
+    # 'MSG91_WIDGET_ID',  # Optional - for MSG91 OTP widget
+    # 'MSG91_TOKEN_AUTH',  # Optional - for MSG91 OTP widget
 ]
 
 
@@ -89,14 +90,14 @@ def validate_environment():
         if not os.environ.get('ALLOWED_ORIGINS'):
             warnings.append("ALLOWED_ORIGINS not set - CORS may not work correctly")
         
-        # Check for SMS provider configuration
-        has_msg91_api = os.environ.get('MSG91_AUTHKEY')
-        has_msg91_widget = os.environ.get('MSG91_WIDGET_ID') and os.environ.get('MSG91_TOKEN_AUTH')
-        
-        if not has_msg91_api:
-            warnings.append("MSG91_AUTHKEY not configured. Phone OTP SMS will not be sent (OTP will still be generated).")
-        if not has_msg91_widget:
-            warnings.append("MSG91_WIDGET_ID and MSG91_TOKEN_AUTH not configured. OTP widget will not work.")
+        # SMS provider configuration check - DISABLED
+        # has_msg91_api = os.environ.get('MSG91_AUTHKEY')
+        # has_msg91_widget = os.environ.get('MSG91_WIDGET_ID') and os.environ.get('MSG91_TOKEN_AUTH')
+        # 
+        # if not has_msg91_api:
+        #     warnings.append("MSG91_AUTHKEY not configured. Phone OTP SMS will not be sent (OTP will still be generated).")
+        # if not has_msg91_widget:
+        #     warnings.append("MSG91_WIDGET_ID and MSG91_TOKEN_AUTH not configured. OTP widget will not work.")
     
     # Check for development-only variables in production
     if ENV == 'production':

@@ -142,19 +142,27 @@ class Config:
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
     UPLOAD_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.pdf', '.doc', '.docx'}
     
-    # MSG91 Configuration
+    # MSG91 Configuration - DISABLED
     # Get credentials from https://msg91.com
     # Authkey is required for MSG91 SMS API
-    MSG91_AUTHKEY = os.environ.get('MSG91_AUTHKEY')
+    # MSG91_AUTHKEY = os.environ.get('MSG91_AUTHKEY')
     # Widget ID and Token Auth for MSG91 OTP widget (required from .env)
-    MSG91_WIDGET_ID = os.environ.get('MSG91_WIDGET_ID')
-    MSG91_TOKEN_AUTH = os.environ.get('MSG91_TOKEN_AUTH')
+    # MSG91_WIDGET_ID = os.environ.get('MSG91_WIDGET_ID')
+    # MSG91_TOKEN_AUTH = os.environ.get('MSG91_TOKEN_AUTH')
     # Sender ID (6 characters, alphanumeric) - required for SMS sending
-    MSG91_SENDER_ID = os.environ.get('MSG91_SENDER_ID', 'IMPRTU')
+    # MSG91_SENDER_ID = os.environ.get('MSG91_SENDER_ID', 'IMPRTU')
     # MSG91 Route (1=Promotional, 4=Transactional) - defaults to 4 for OTP
-    MSG91_ROUTE = os.environ.get('MSG91_ROUTE', '4')
+    # MSG91_ROUTE = os.environ.get('MSG91_ROUTE', '4')
     # DLT Template ID (if you have registered template with DLT)
-    MSG91_DLT_TE_ID = os.environ.get('MSG91_DLT_TE_ID', '').strip()
+    # MSG91_DLT_TE_ID = os.environ.get('MSG91_DLT_TE_ID', '').strip()
+    
+    # Placeholder values to prevent errors
+    MSG91_AUTHKEY = None
+    MSG91_WIDGET_ID = None
+    MSG91_TOKEN_AUTH = None
+    MSG91_SENDER_ID = None
+    MSG91_ROUTE = '4'
+    MSG91_DLT_TE_ID = ''
     
     # Production Security Settings
     if ENV == 'production':

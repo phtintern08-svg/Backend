@@ -129,12 +129,14 @@ app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER') or app
 app.config['MAIL_TIMEOUT'] = 5  # 5 second timeout for email
 app.config['MAIL_USE_SSL'] = False
 
-# MSG91 Configuration (SMS Gateway for India)
+# MSG91 Configuration (SMS Gateway for India) - DISABLED
 # Sign up at https://msg91.com to get your Authkey
 # Get Authkey from: Dashboard -> API -> Authkey
 # Use Config values to avoid duplication
-MSG91_AUTHKEY = Config.MSG91_AUTHKEY
-MSG91_SENDER_ID = Config.MSG91_SENDER_ID
+# MSG91_AUTHKEY = Config.MSG91_AUTHKEY
+# MSG91_SENDER_ID = Config.MSG91_SENDER_ID
+MSG91_AUTHKEY = None
+MSG91_SENDER_ID = None
 
 # Initialize extensions
 # Database initialization with improved connection pooling (configured in config.py)
@@ -402,25 +404,26 @@ def get_config():
     except Exception as e:
         return handle_exception(e, {"endpoint": request.path, "method": request.method}, "An error occurred while processing your request.")
 
-@app.route('/api/msg91-config', methods=['GET'])
-@csrf.exempt  # Public endpoint for OTP widget
-def get_msg91_config():
-    """Get MSG91 OTP widget configuration"""
-    try:
-        widget_id = Config.MSG91_WIDGET_ID
-        token_auth = Config.MSG91_TOKEN_AUTH
-        
-        if not widget_id or not token_auth:
-            return jsonify({
-                "error": "MSG91 widget credentials not configured. Please set MSG91_WIDGET_ID and MSG91_TOKEN_AUTH in environment variables."
-            }), 500
-        
-        return jsonify({
-            "widgetId": widget_id,
-            "tokenAuth": token_auth
-        }), 200
-    except Exception as e:
-        return handle_exception(e, {"endpoint": request.path, "method": request.method}, "An error occurred while processing your request.")
+# MSG91 Config Endpoint - DISABLED
+# @app.route('/api/msg91-config', methods=['GET'])
+# @csrf.exempt  # Public endpoint for OTP widget
+# def get_msg91_config():
+#     """Get MSG91 OTP widget configuration"""
+#     try:
+#         widget_id = Config.MSG91_WIDGET_ID
+#         token_auth = Config.MSG91_TOKEN_AUTH
+#         
+#         if not widget_id or not token_auth:
+#             return jsonify({
+#                 "error": "MSG91 widget credentials not configured. Please set MSG91_WIDGET_ID and MSG91_TOKEN_AUTH in environment variables."
+#             }), 500
+#         
+#         return jsonify({
+#             "widgetId": widget_id,
+#             "tokenAuth": token_auth
+#         }), 200
+#     except Exception as e:
+#         return handle_exception(e, {"endpoint": request.path, "method": request.method}, "An error occurred while processing your request.")
 
 def _perform_mappls_reverse_geocode(lat, lng):
     """Helper to fetch human-readable address from MapmyIndia"""
@@ -981,64 +984,68 @@ def send_otp():
                 email_thread.daemon = True
                 email_thread.start()
 
+            # Phone OTP via MSG91 - DISABLED
+            # elif type_ == 'phone':
+            #     # Send SMS using MSG91 API (India)
+            #     if MSG91_AUTHKEY:
+            #         try:
+            #             # Clean phone number (remove +91, spaces, dashes)
+            #             clean_phone = recipient.replace('+91', '').replace(' ', '').replace('-', '')
+            #             
+            #             # Ensure phone number is 10 digits (Indian format)
+            #             if len(clean_phone) == 10:
+            #                 clean_phone = '91' + clean_phone
+            #             elif not clean_phone.startswith('91'):
+            #                 clean_phone = '91' + clean_phone.lstrip('0')
+            #             
+            #             # Prepare the message
+            #             message = f"Your ImpromptuIndian verification code is {otp}. Valid for 10 minutes."
+            #             
+            #             # MSG91 Send HTTP API endpoint (for transactional SMS)
+            #             url = "https://control.msg91.com/api/sendhttp.php"
+            #             
+            #             # MSG91 API parameters
+            #             params = {
+            #                 "authkey": MSG91_AUTHKEY,
+            #                 "mobiles": clean_phone,
+            #                 "message": message,
+            #                 "sender": MSG91_SENDER_ID,
+            #                 "route": Config.MSG91_ROUTE,  # Configurable route (default: 4 for transactional)
+            #                 "country": "91",  # India country code
+            #             }
+            #             
+            #             # Add DLT Template ID if configured
+            #             if Config.MSG91_DLT_TE_ID:
+            #                 params["DLT_TE_ID"] = Config.MSG91_DLT_TE_ID
+            #             
+            #             # Send SMS using MSG91 API
+            #             response = requests.get(url, params=params, timeout=10)
+            #             
+            #             # Check response
+            #             if response.status_code == 200:
+            #                 response_text = response.text.strip()
+            #                 # MSG91 returns request ID on success (numeric string)
+            #                 if response_text.isdigit():
+            #                     log_info(f"MSG91 SMS sent successfully to {recipient}", {
+            #                         "otp_sent": True,
+            #                         "request_id": response_text
+            #                     })
+            #                 else:
+            #                     # Error response from MSG91
+            #                     log_warning(f"MSG91 SMS error: {response_text}", {"recipient": recipient})
+            #             else:
+            #                 log_warning(f"MSG91 SMS failed with status {response.status_code}", {"recipient": recipient})
+            #                 
+            #         except requests.RequestException as e:
+            #             log_error(e, {"recipient": recipient, "error_type": "MSG91_API_REQUEST_FAILED"})
+            #         except Exception as e:
+            #             log_error(e, {"recipient": recipient, "error_type": "MSG91_SMS_SENDING_ERROR"})
+            #     else:
+            #         log_warning("MSG91_AUTHKEY not configured, OTP generated but SMS not sent", {"recipient": recipient})
+            #     # OTP is still generated and stored even if SMS fails
             elif type_ == 'phone':
-                # Send SMS using MSG91 API (India)
-                if MSG91_AUTHKEY:
-                    try:
-                        # Clean phone number (remove +91, spaces, dashes)
-                        clean_phone = recipient.replace('+91', '').replace(' ', '').replace('-', '')
-                        
-                        # Ensure phone number is 10 digits (Indian format)
-                        if len(clean_phone) == 10:
-                            clean_phone = '91' + clean_phone
-                        elif not clean_phone.startswith('91'):
-                            clean_phone = '91' + clean_phone.lstrip('0')
-                        
-                        # Prepare the message
-                        message = f"Your ImpromptuIndian verification code is {otp}. Valid for 10 minutes."
-                        
-                        # MSG91 Send HTTP API endpoint (for transactional SMS)
-                        url = "https://control.msg91.com/api/sendhttp.php"
-                        
-                        # MSG91 API parameters
-                        params = {
-                            "authkey": MSG91_AUTHKEY,
-                            "mobiles": clean_phone,
-                            "message": message,
-                            "sender": MSG91_SENDER_ID,
-                            "route": Config.MSG91_ROUTE,  # Configurable route (default: 4 for transactional)
-                            "country": "91",  # India country code
-                        }
-                        
-                        # Add DLT Template ID if configured
-                        if Config.MSG91_DLT_TE_ID:
-                            params["DLT_TE_ID"] = Config.MSG91_DLT_TE_ID
-                        
-                        # Send SMS using MSG91 API
-                        response = requests.get(url, params=params, timeout=10)
-                        
-                        # Check response
-                        if response.status_code == 200:
-                            response_text = response.text.strip()
-                            # MSG91 returns request ID on success (numeric string)
-                            if response_text.isdigit():
-                                log_info(f"MSG91 SMS sent successfully to {recipient}", {
-                                    "otp_sent": True,
-                                    "request_id": response_text
-                                })
-                            else:
-                                # Error response from MSG91
-                                log_warning(f"MSG91 SMS error: {response_text}", {"recipient": recipient})
-                        else:
-                            log_warning(f"MSG91 SMS failed with status {response.status_code}", {"recipient": recipient})
-                            
-                    except requests.RequestException as e:
-                        log_error(e, {"recipient": recipient, "error_type": "MSG91_API_REQUEST_FAILED"})
-                    except Exception as e:
-                        log_error(e, {"recipient": recipient, "error_type": "MSG91_SMS_SENDING_ERROR"})
-                else:
-                    log_warning("MSG91_AUTHKEY not configured, OTP generated but SMS not sent", {"recipient": recipient})
-                # OTP is still generated and stored even if SMS fails
+                # Phone OTP is disabled - return error
+                return jsonify({"error": "Phone OTP authentication is currently disabled. Please use email for OTP verification."}), 400
         
             return jsonify({"message": f"OTP sent successfully to {recipient}"}), 200
         except Exception:

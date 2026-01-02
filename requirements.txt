@@ -1,0 +1,46 @@
+# Python 3.13.5 Compatible Requirements
+# Core Flask Framework
+Flask==3.1.2
+Flask-SQLAlchemy==3.1.1
+Flask-Mail==0.10.0
+flask-cors==6.0.1
+flask-marshmallow==1.3.0
+
+# Database & ORM
+PyMySQL==1.1.2
+SQLAlchemy==2.0.45
+
+# Serialization
+marshmallow==4.1.0
+marshmallow-sqlalchemy==1.4.2
+
+# HTTP & Requests
+requests==2.32.3
+
+# Security & Encryption
+cryptography==46.0.3
+Werkzeug==3.1.4
+PyJWT==2.9.0
+Flask-Limiter==3.8.0
+Flask-WTF==1.2.1
+WTForms==3.1.2
+bleach==6.1.0
+
+# Environment & Configuration
+python-dotenv==1.2.1
+
+# Excel/Spreadsheet Support
+openpyxl==3.1.5
+
+# Production Server
+gunicorn==23.0.0
+
+# System Utilities
+psutil==5.9.8
+
+# File Upload Security
+python-magic==0.4.27
+# pyclamd==1.0.1  # Optional - for virus scanning (requires ClamAV daemon)
+
+# Error Tracking (Optional - install if using Sentry)
+# sentry-sdk[flask]==2.19.0

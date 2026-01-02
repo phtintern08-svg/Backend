@@ -5,30 +5,25 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
-    # Environment Configuration
-    ENV = os.environ.get('ENV', 'development')
-    DEBUG = ENV == 'development'
+    # Environment Configuration - PRODUCTION ONLY
+    ENV = os.environ.get('ENV', 'production')  # Default to production
+    DEBUG = False  # Always False in production
     TESTING = False
     
     # Secret key for session management and security
-    # Required in production - no default fallback
+    # Required - no default fallback
     SECRET_KEY = os.environ.get('SECRET_KEY')
-    if not SECRET_KEY and ENV == 'production':
-        raise ValueError("SECRET_KEY environment variable is required in production")
     if not SECRET_KEY:
-        SECRET_KEY = 'you-will-never-guess-dev-only'  # Only for development
+        raise ValueError("SECRET_KEY environment variable is required")
     
-    # Domain Configuration
-    BASE_DOMAIN = os.environ.get('BASE_DOMAIN', 'localhost:5000')
+    # Domain Configuration - PRODUCTION ONLY
+    BASE_DOMAIN = os.environ.get('BASE_DOMAIN', 'impromptuindian.com')
     APP_SUBDOMAIN = os.environ.get('APP_SUBDOMAIN', 'apparels')
     VENDOR_SUBDOMAIN = os.environ.get('VENDOR_SUBDOMAIN', 'vendor')
     RIDER_SUBDOMAIN = os.environ.get('RIDER_SUBDOMAIN', 'rider')
     
-    # Server Configuration
-    if ENV == 'production':
-        SERVER_NAME = BASE_DOMAIN
-    else:
-        SERVER_NAME = None  # Let Flask auto-detect for development
+    # Server Configuration - PRODUCTION ONLY
+    SERVER_NAME = BASE_DOMAIN
     
     # Database Credentials (from environment variables - required in production)
     MYSQL_USER = os.environ.get('DB_USER')
@@ -36,10 +31,9 @@ class Config:
     MYSQL_HOST = os.environ.get('DB_HOST')
     MYSQL_PORT = int(os.environ.get('DB_PORT', 3306))
     
-    # Validate database credentials in production
-    if ENV == 'production':
-        if not MYSQL_USER or not MYSQL_PASSWORD or not MYSQL_HOST:
-            raise ValueError("DB_USER, DB_PASSWORD, and DB_HOST environment variables are required in production")
+    # Validate database credentials - REQUIRED
+    if not MYSQL_USER or not MYSQL_PASSWORD or not MYSQL_HOST:
+        raise ValueError("DB_USER, DB_PASSWORD, and DB_HOST environment variables are required")
     
     # Database Names (from environment variables - required in production)
     DB_NAME_ADMIN = os.environ.get('DB_NAME_ADMIN')
@@ -53,22 +47,21 @@ class Config:
         if not DB_NAME_ADMIN or not DB_NAME_CUSTOMER or not DB_NAME_VENDOR or not DB_NAME_RIDER or not DB_NAME_SUPPORT:
             raise ValueError("All database name environment variables (DB_NAME_ADMIN, DB_NAME_CUSTOMER, DB_NAME_VENDOR, DB_NAME_RIDER, DB_NAME_SUPPORT) are required in production")
     
-    # Primary database (Admin schema - default)
-    # Use environment variable or fallback to default only in development
-    MYSQL_DB = DB_NAME_ADMIN if DB_NAME_ADMIN else ('impromptuindian_admin' if ENV != 'production' else None)
+    # Primary database (Admin schema - default) - PRODUCTION ONLY
+    # All database names are required from environment variables
+    MYSQL_DB = DB_NAME_ADMIN
     
     # Main SQLAlchemy Database URI (Admin schema as default)
-    # Only create URI if credentials are available
     if MYSQL_USER and MYSQL_PASSWORD and MYSQL_HOST and MYSQL_DB:
         SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}"
         
-        # Binds for different schemas (each is a separate MySQL database)
-        # Use environment variables or fallback to defaults only in development
-        admin_db = DB_NAME_ADMIN if DB_NAME_ADMIN else ('impromptuindian_admin' if ENV != 'production' else None)
-        customer_db = DB_NAME_CUSTOMER if DB_NAME_CUSTOMER else ('impromptuindian_customer' if ENV != 'production' else None)
-        vendor_db = DB_NAME_VENDOR if DB_NAME_VENDOR else ('impromptuindian_vendor' if ENV != 'production' else None)
-        rider_db = DB_NAME_RIDER if DB_NAME_RIDER else ('impromptuindian_rider' if ENV != 'production' else None)
-        support_db = DB_NAME_SUPPORT if DB_NAME_SUPPORT else ('impromptuindian_support' if ENV != 'production' else None)
+        # Binds for different schemas (each is a separate MySQL database) - PRODUCTION ONLY
+        # All database names are required from environment variables
+        admin_db = DB_NAME_ADMIN
+        customer_db = DB_NAME_CUSTOMER
+        vendor_db = DB_NAME_VENDOR
+        rider_db = DB_NAME_RIDER
+        support_db = DB_NAME_SUPPORT
         
         if admin_db and customer_db and vendor_db and rider_db and support_db:
             SQLALCHEMY_BINDS = {
@@ -81,7 +74,7 @@ class Config:
         else:
             SQLALCHEMY_BINDS = {}
     else:
-        # Development fallback - will fail in production due to validation above
+        # PRODUCTION ONLY - All credentials are required
         SQLALCHEMY_DATABASE_URI = None
         SQLALCHEMY_BINDS = {}
     

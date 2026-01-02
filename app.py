@@ -255,83 +255,62 @@ if Config.ENV == 'production':
          allow_headers=["Content-Type", "Authorization", "X-CSRFToken"],
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
          expose_headers=["Content-Type"])
-else:
-    # Allow all origins in development (for testing)
-    CORS(app, 
-         allow_headers=["Content-Type", "Authorization", "X-CSRFToken"],
-         expose_headers=["Content-Type"])
 
 @app.route('/favicon.ico')
 def favicon():
     return send_from_directory(os.path.join(app.root_path, '../Frontend/apparels.impromptuindian.com/images'),
                                'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
-# Validate environment variables on startup
-if Config.ENV == 'production':
-    from validate_env import validate_environment
-    is_valid, missing_vars, warnings = validate_environment()
-    if not is_valid:
-        error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
-        print(f"\n{'='*60}")
-        print("ERROR: Environment validation failed!")
-        print(f"{'='*60}")
-        print(error_msg)
-        print("\nPlease set all required variables. See env.example for reference.")
-        print(f"{'='*60}\n")
-        raise ValueError(error_msg)
-    if warnings:
-        for warning in warnings:
-            log_warning(f"Environment variable warning: {warning}")
+# Validate environment variables on startup - PRODUCTION ONLY
+from validate_env import validate_environment
+is_valid, missing_vars, warnings = validate_environment()
+if not is_valid:
+    error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
+    print(f"\n{'='*60}")
+    print("ERROR: Environment validation failed!")
+    print(f"{'='*60}")
+    print(error_msg)
+    print("\nPlease set all required variables. See env.example for reference.")
+    print(f"{'='*60}\n")
+    raise ValueError(error_msg)
+if warnings:
+    for warning in warnings:
+        log_warning(f"Environment variable warning: {warning}")
 
-# Create tables before first request - Only in development
-# In production, tables should already exist (created via migrations or manual SQL)
-# This prevents connection errors during app startup in production
-if Config.ENV == 'development':
+# PRODUCTION ONLY: Tables should already exist (created via migrations or manual SQL)
+# Do NOT create tables at startup - this causes connection errors
+# Only create initial admin if environment variables are set
+# This is done lazily to avoid blocking app startup
+def create_initial_admin_if_needed():
+    """Create initial admin if environment variables are set - called lazily"""
     try:
-        with app.app_context():
-            db.create_all()
-            log_info("Database tables created/verified (development mode)", {"environment": "development"})
-            
-            # Create default admin only in development environment
-            default_username = os.environ.get('DEFAULT_ADMIN_USERNAME', 'admin@gmail.com')
-            default_password = os.environ.get('DEFAULT_ADMIN_PASSWORD', 'admin')
-            
-            if not Admin.query.filter_by(username=default_username).first():
-                default_admin = Admin(
-                    username=default_username,
-                    password_hash=generate_password_hash(default_password)
-                )
-                db.session.add(default_admin)
-                db.session.commit()
-                log_info(f"Default admin created (DEV ONLY): {default_username}", {"environment": "development"})
+        initial_admin_username = os.environ.get('INITIAL_ADMIN_USERNAME')
+        initial_admin_password = os.environ.get('INITIAL_ADMIN_PASSWORD')
+        
+        if initial_admin_username and initial_admin_password:
+            with app.app_context():
+                try:
+                    if not Admin.query.filter_by(username=initial_admin_username).first():
+                        initial_admin = Admin(
+                            username=initial_admin_username,
+                            password_hash=generate_password_hash(initial_admin_password)
+                        )
+                        db.session.add(initial_admin)
+                        db.session.commit()
+                        log_info(f"Initial admin created from environment variables: {initial_admin_username}")
+                        # Clear environment variables after use for security
+                        os.environ.pop('INITIAL_ADMIN_USERNAME', None)
+                        os.environ.pop('INITIAL_ADMIN_PASSWORD', None)
+                except Exception as db_error:
+                    log_warning(f"Could not create initial admin - database may not be ready: {str(db_error)}")
     except Exception as e:
-        log_error(e, {"context": "db.create_all() in development", "environment": "development"})
-        # Don't fail app startup in development if tables already exist
-        log_warning("Could not create tables - they may already exist", {"environment": "development"})
-else:
-    # Production: Only create initial admin if environment variables are set
-    # Tables should already exist in production
-    try:
-        with app.app_context():
-            initial_admin_username = os.environ.get('INITIAL_ADMIN_USERNAME')
-            initial_admin_password = os.environ.get('INITIAL_ADMIN_PASSWORD')
-            
-            if initial_admin_username and initial_admin_password:
-                if not Admin.query.filter_by(username=initial_admin_username).first():
-                    initial_admin = Admin(
-                        username=initial_admin_username,
-                        password_hash=generate_password_hash(initial_admin_password)
-                    )
-                    db.session.add(initial_admin)
-                    db.session.commit()
-                    log_info(f"Initial admin created from environment variables: {initial_admin_username}", {"environment": "production"})
-                    # Clear environment variables after use for security
-                    os.environ.pop('INITIAL_ADMIN_USERNAME', None)
-                    os.environ.pop('INITIAL_ADMIN_PASSWORD', None)
-    except Exception as e:
-        log_error(e, {"context": "Initial admin creation in production", "environment": "production"})
-        # Don't fail app startup if admin creation fails
-        log_warning("Could not create initial admin - may already exist or tables not ready", {"environment": "production"})
+        log_warning(f"Could not create initial admin: {str(e)}")
+
+# Schedule admin creation to run after app is fully initialized
+# Use a background thread to avoid blocking startup
+import threading
+admin_init_thread = threading.Thread(target=create_initial_admin_if_needed, daemon=True)
+admin_init_thread.start()
 
 import random
 import time
@@ -355,32 +334,25 @@ def build_subdomain_url(subdomain, path='', query_params=None):
         query_params: Optional dict of query parameters
     
     Returns:
-        str: Complete URL (https in production, http in development)
+        str: Complete URL (https in production)
     """
     import urllib.parse
     
-    # Determine scheme based on environment
-    scheme = 'https' if Config.ENV == 'production' else 'http'
+    # PRODUCTION ONLY - Always use https
+    scheme = 'https'
     
     # Get base domain from config
     base_domain = Config.BASE_DOMAIN
     
     # Build subdomain host
     if subdomain:
-        # Extract domain and port from BASE_DOMAIN
+        # Extract domain from BASE_DOMAIN (no port in production)
         if ':' in base_domain:
-            domain, port = base_domain.split(':', 1)
-            subdomain_domain = f"{subdomain}.{domain}"
-            # In production, don't include port (assumes standard ports 80/443)
-            if Config.ENV == 'production':
-                host = subdomain_domain
-            else:
-                # In development, preserve the port
-                host = f"{subdomain_domain}:{port}"
+            domain = base_domain.split(':', 1)[0]
         else:
-            # No port specified in BASE_DOMAIN
-            subdomain_domain = f"{subdomain}.{base_domain}"
-            host = subdomain_domain
+            domain = base_domain
+        subdomain_domain = f"{subdomain}.{domain}"
+        host = subdomain_domain
     else:
         # No subdomain - use base domain as-is
         # In production, remove port if present (assumes standard ports)
@@ -862,7 +834,7 @@ def support():
 def terms():
     return send_from_directory("../Frontend/apparels.impromptuindian.com", "terms.html")
 
-@app.route("/login") # GET request for page, POST is handled by API
+@app.route("/login", methods=['GET']) # GET request for page, POST is handled by API route below
 def login_page():
     return send_from_directory("../Frontend/apparels.impromptuindian.com", "login.html")
 
@@ -6124,7 +6096,6 @@ def database_health_check():
     except Exception as e:
         return handle_exception(e, {"endpoint": "/api/health/database"}, "Database health check failed")
 
-if __name__ == '__main__':
-    # Production should use gunicorn or similar WSGI server
-    # This is only for local development
-    app.run(debug=Config.DEBUG, host='0.0.0.0', port=5000)
+# WSGI Application Object for Passenger/cPanel
+# This is what Passenger looks for when loading the application
+application = app

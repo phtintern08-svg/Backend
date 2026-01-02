@@ -9,7 +9,8 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-ENV = os.environ.get('ENV', 'development')
+# PRODUCTION ONLY - Force production mode
+ENV = os.environ.get('ENV', 'production')
 REQUIRED_VARS = {
     'production': [
         'SECRET_KEY',
@@ -24,10 +25,6 @@ REQUIRED_VARS = {
         'MAIL_USERNAME',
         'MAIL_PASSWORD',
         'MAPPLS_API_KEY',
-    ],
-    'development': [
-        # Development has fewer requirements
-        'SECRET_KEY',  # Optional but recommended
     ]
 }
 
@@ -75,34 +72,19 @@ def validate_environment():
     missing_vars = []
     warnings = []
     
-    # Check required variables for current environment
-    required = REQUIRED_VARS.get(ENV, [])
+    # PRODUCTION ONLY - Always use production requirements
+    required = REQUIRED_VARS.get('production', [])
     
     for var in required:
         if not os.environ.get(var):
             missing_vars.append(var)
     
-    # Check for recommended variables
-    if ENV == 'production':
-        if not os.environ.get('BASE_DOMAIN'):
-            warnings.append("BASE_DOMAIN not set - using default")
-        
-        if not os.environ.get('ALLOWED_ORIGINS'):
-            warnings.append("ALLOWED_ORIGINS not set - CORS may not work correctly")
-        
-        # SMS provider configuration check - DISABLED
-        # has_msg91_api = os.environ.get('MSG91_AUTHKEY')
-        # has_msg91_widget = os.environ.get('MSG91_WIDGET_ID') and os.environ.get('MSG91_TOKEN_AUTH')
-        # 
-        # if not has_msg91_api:
-        #     warnings.append("MSG91_AUTHKEY not configured. Phone OTP SMS will not be sent (OTP will still be generated).")
-        # if not has_msg91_widget:
-        #     warnings.append("MSG91_WIDGET_ID and MSG91_TOKEN_AUTH not configured. OTP widget will not work.")
+    # Check for recommended variables - PRODUCTION ONLY
+    if not os.environ.get('BASE_DOMAIN'):
+        warnings.append("BASE_DOMAIN not set - using default")
     
-    # Check for development-only variables in production
-    if ENV == 'production':
-        if os.environ.get('DEFAULT_ADMIN_USERNAME') or os.environ.get('DEFAULT_ADMIN_PASSWORD'):
-            warnings.append("DEFAULT_ADMIN_* variables should not be used in production")
+    if not os.environ.get('ALLOWED_ORIGINS'):
+        warnings.append("ALLOWED_ORIGINS not set - CORS may not work correctly")
     
     is_valid = len(missing_vars) == 0
     

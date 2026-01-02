@@ -283,41 +283,55 @@ if Config.ENV == 'production':
         for warning in warnings:
             log_warning(f"Environment variable warning: {warning}")
 
-# Create tables before first request
-with app.app_context():
-    db.create_all()
-    
-    # Create default admin only in development environment
-    # In production, admin must be created manually or via environment variables
-    if Config.ENV == 'development':
-        default_username = os.environ.get('DEFAULT_ADMIN_USERNAME', 'admin@gmail.com')
-        default_password = os.environ.get('DEFAULT_ADMIN_PASSWORD', 'admin')
-        
-        if not Admin.query.filter_by(username=default_username).first():
-            default_admin = Admin(
-                username=default_username,
-                password_hash=generate_password_hash(default_password)
-            )
-            db.session.add(default_admin)
-            db.session.commit()
-            log_info(f"Default admin created (DEV ONLY): {default_username}", {"environment": "development"})
-    else:
-        # Production: Check for initial admin from environment variables
-        initial_admin_username = os.environ.get('INITIAL_ADMIN_USERNAME')
-        initial_admin_password = os.environ.get('INITIAL_ADMIN_PASSWORD')
-        
-        if initial_admin_username and initial_admin_password:
-            if not Admin.query.filter_by(username=initial_admin_username).first():
-                initial_admin = Admin(
-                    username=initial_admin_username,
-                    password_hash=generate_password_hash(initial_admin_password)
+# Create tables before first request - Only in development
+# In production, tables should already exist (created via migrations or manual SQL)
+# This prevents connection errors during app startup in production
+if Config.ENV == 'development':
+    try:
+        with app.app_context():
+            db.create_all()
+            log_info("Database tables created/verified (development mode)", {"environment": "development"})
+            
+            # Create default admin only in development environment
+            default_username = os.environ.get('DEFAULT_ADMIN_USERNAME', 'admin@gmail.com')
+            default_password = os.environ.get('DEFAULT_ADMIN_PASSWORD', 'admin')
+            
+            if not Admin.query.filter_by(username=default_username).first():
+                default_admin = Admin(
+                    username=default_username,
+                    password_hash=generate_password_hash(default_password)
                 )
-                db.session.add(initial_admin)
+                db.session.add(default_admin)
                 db.session.commit()
-                log_info(f"Initial admin created from environment variables: {initial_admin_username}", {"environment": "production"})
-                # Clear environment variables after use for security
-                os.environ.pop('INITIAL_ADMIN_USERNAME', None)
-                os.environ.pop('INITIAL_ADMIN_PASSWORD', None)
+                log_info(f"Default admin created (DEV ONLY): {default_username}", {"environment": "development"})
+    except Exception as e:
+        log_error(e, {"context": "db.create_all() in development", "environment": "development"})
+        # Don't fail app startup in development if tables already exist
+        log_warning("Could not create tables - they may already exist", {"environment": "development"})
+else:
+    # Production: Only create initial admin if environment variables are set
+    # Tables should already exist in production
+    try:
+        with app.app_context():
+            initial_admin_username = os.environ.get('INITIAL_ADMIN_USERNAME')
+            initial_admin_password = os.environ.get('INITIAL_ADMIN_PASSWORD')
+            
+            if initial_admin_username and initial_admin_password:
+                if not Admin.query.filter_by(username=initial_admin_username).first():
+                    initial_admin = Admin(
+                        username=initial_admin_username,
+                        password_hash=generate_password_hash(initial_admin_password)
+                    )
+                    db.session.add(initial_admin)
+                    db.session.commit()
+                    log_info(f"Initial admin created from environment variables: {initial_admin_username}", {"environment": "production"})
+                    # Clear environment variables after use for security
+                    os.environ.pop('INITIAL_ADMIN_USERNAME', None)
+                    os.environ.pop('INITIAL_ADMIN_PASSWORD', None)
+    except Exception as e:
+        log_error(e, {"context": "Initial admin creation in production", "environment": "production"})
+        # Don't fail app startup if admin creation fails
+        log_warning("Could not create initial admin - may already exist or tables not ready", {"environment": "production"})
 
 import random
 import time

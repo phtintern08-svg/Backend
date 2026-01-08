@@ -53,15 +53,17 @@ def create_engine_with_retry(database_uri: str, engine_options: dict, max_retrie
 
 
 @event.listens_for(Engine, "connect")
-def set_sqlite_pragma(dbapi_conn, connection_record):
-    """Set connection-level settings (for MySQL)"""
+def set_mysql_session_vars(dbapi_conn, connection_record):
+    """Set connection-level settings (for MySQL) - PyMySQL compatible"""
     # This is called for each new connection
     try:
-        # Set session variables for MySQL
-        dbapi_conn.execute("SET SESSION sql_mode='STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION'")
-        dbapi_conn.execute("SET SESSION time_zone='+00:00'")  # UTC timezone
+        # PyMySQL requires cursor for executing SQL
+        cursor = dbapi_conn.cursor()
+        cursor.execute("SET SESSION sql_mode='STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION'")
+        cursor.execute("SET SESSION time_zone='+00:00'")  # UTC timezone
+        cursor.close()
     except Exception:
-        # Ignore errors (might not be MySQL)
+        # Ignore errors (might not be MySQL or connection might be in bad state)
         pass
 
 

@@ -1166,15 +1166,22 @@ def login_post():
         return response, 401
     except Exception as e:
         # Log the full error for debugging
+        error_type = type(e).__name__
+        error_msg = str(e)
         log_error(e, {"endpoint": "/login", "method": "POST", "identifier": identifier if 'identifier' in locals() else None})
-        # Always return JSON, never HTML - handle_exception might return HTML in some cases
-        error_message = "Login failed. Please try again."
-        if hasattr(e, '__class__'):
-            error_type = e.__class__.__name__
-            if 'Database' in error_type or 'Connection' in error_type or 'OperationalError' in error_type:
-                error_message = "Database connection error. Please try again later."
-            elif 'Validation' in error_type or 'ValueError' in error_type:
-                error_message = "Invalid input data. Please check your credentials."
+        
+        # Always return JSON, never HTML
+        if 'InvalidRequestError' in error_type and 'connection is closed' in error_msg.lower():
+            # Database connection pool issue - this is a server configuration problem
+            app_logger.critical(f"CRITICAL: Database connection pool error - connections are being closed immediately. Check engine options and pool configuration.")
+            error_message = "Database connection error. The server is experiencing connection issues. Please try again in a moment."
+        elif 'Database' in error_type or 'Connection' in error_type or 'OperationalError' in error_type:
+            error_message = "Database connection error. Please try again later."
+        elif 'Validation' in error_type or 'ValueError' in error_type:
+            error_message = "Invalid input data. Please check your credentials."
+        else:
+            error_message = "Login failed. Please try again."
+        
         response = jsonify({"error": error_message})
         response.headers['Content-Type'] = 'application/json'
         return response, 500

@@ -257,23 +257,62 @@ def set_security_headers(response):
     
     return response
 
+# Helper function to check if request expects JSON response
+def expects_json():
+    """Check if the request expects a JSON response"""
+    # API endpoints that should always return JSON
+    api_endpoints = [
+        '/login', '/register', '/send-otp', '/verify-otp',
+        '/api/', '/admin/otp-logs', '/admin/view-otp-logs'
+    ]
+    
+    # Check if path matches any API endpoint
+    for endpoint in api_endpoints:
+        if request.path.startswith(endpoint):
+            return True
+    
+    # Check if it's a POST request with JSON content type
+    if request.method == 'POST' and request.content_type and 'application/json' in request.content_type:
+        return True
+    
+    # Check if Accept header requests JSON
+    if request.headers.get('Accept', '').startswith('application/json'):
+        return True
+    
+    return False
+
 # Global Error Handlers - Ensure API routes always return JSON, not HTML
 @app.errorhandler(404)
 def not_found(error):
     """Handle 404 errors - return JSON for API routes"""
-    if request.path.startswith('/api/') or request.method == 'POST' and (request.path.startswith('/login') or request.path.startswith('/register')):
-        return jsonify({"error": "Endpoint not found"}), 404
+    if expects_json():
+        response = jsonify({"error": "Endpoint not found"})
+        response.headers['Content-Type'] = 'application/json'
+        return response, 404
     # For other routes, let Flask handle normally (for serving HTML pages)
     return error
 
 @app.errorhandler(500)
 def internal_error(error):
     """Handle 500 errors - return JSON for API routes"""
-    if request.path.startswith('/api/') or request.method == 'POST' and (request.path.startswith('/login') or request.path.startswith('/register')):
+    if expects_json():
         log_error(error, {"endpoint": request.path, "method": request.method})
-        return jsonify({"error": "Internal server error. Please try again later."}), 500
+        response = jsonify({"error": "Internal server error. Please try again later."})
+        response.headers['Content-Type'] = 'application/json'
+        return response, 500
     # For other routes, let Flask handle normally
     return error
+
+@app.errorhandler(Exception)
+def handle_all_exceptions(error):
+    """Catch-all error handler for unhandled exceptions"""
+    if expects_json():
+        log_error(error, {"endpoint": request.path, "method": request.method})
+        response = jsonify({"error": "An unexpected error occurred. Please try again later."})
+        response.headers['Content-Type'] = 'application/json'
+        return response, 500
+    # Re-raise for Flask's default handling
+    raise error
 
 # CORS Configuration (JSONP is preferred for cross-origin, CORS as fallback)
 # JSONP support is implemented via jsonp_handler.py
@@ -972,7 +1011,9 @@ def send_otp():
         type_ = data.get('type') if data else None
         
         if not recipient or not type_:
-            return jsonify({"error": "Recipient and type required"}), 400
+            response = jsonify({"error": "Recipient and type required"})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 400
         
         # Generate 6-digit OTP
         otp = str(random.randint(100000, 999999))
@@ -1001,12 +1042,16 @@ def send_otp():
                 # Validate email format
                 email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
                 if not re.match(email_pattern, recipient):
-                    return jsonify({"error": "Invalid email address format"}), 400
+                    response = jsonify({"error": "Invalid email address format"})
+                    response.headers['Content-Type'] = 'application/json'
+                    return response, 400
                 
                 # Check if SMTP is configured
                 if not app.config.get('MAIL_USERNAME') or not app.config.get('MAIL_PASSWORD'):
                     log_error(Exception("SMTP not configured"), {"recipient": recipient, "error_type": "SMTP_NOT_CONFIGURED"})
-                    return jsonify({"error": "Email service is not configured. Please contact support."}), 500
+                    response = jsonify({"error": "Email service is not configured. Please contact support."})
+                    response.headers['Content-Type'] = 'application/json'
+                    return response, 500
                 
                 # Send email in background thread to avoid blocking
                 def send_email_async():
@@ -1044,7 +1089,9 @@ def send_otp():
                 email_thread.start()
                 
                 # Return success immediately (email is sent asynchronously)
-                return jsonify({"message": f"OTP sent successfully to {recipient}"}), 200
+                response = jsonify({"message": f"OTP sent successfully to {recipient}"})
+                response.headers['Content-Type'] = 'application/json'
+                return response, 200
 
             # Phone OTP via MSG91 - DISABLED
             # elif type_ == 'phone':
@@ -1107,10 +1154,14 @@ def send_otp():
             #     # OTP is still generated and stored even if SMS fails
             elif type_ == 'phone':
                 # Phone OTP is disabled - return error
-                return jsonify({"error": "Phone OTP authentication is currently disabled. Please use email for OTP verification."}), 400
+                response = jsonify({"error": "Phone OTP authentication is currently disabled. Please use email for OTP verification."})
+                response.headers['Content-Type'] = 'application/json'
+                return response, 400
             else:
                 # Invalid type
-                return jsonify({"error": "Invalid OTP type. Use 'email' or 'phone'."}), 400
+                response = jsonify({"error": "Invalid OTP type. Use 'email' or 'phone'."})
+                response.headers['Content-Type'] = 'application/json'
+                return response, 400
                 
         except Exception as send_err:
             # Log the error but still return success since OTP is generated and stored
@@ -1119,10 +1170,14 @@ def send_otp():
                 "type": type_,
                 "error_type": "OTP_SENDING_ERROR"
             })
-            return jsonify({"message": f"OTP sent successfully to {recipient}"}), 200
+            response = jsonify({"message": f"OTP sent successfully to {recipient}"})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 200
             
     except Exception as e:
-        return jsonify({"error": "Failed to send OTP. Please check server configuration."}), 500
+        response = jsonify({"error": "Failed to send OTP. Please check server configuration."})
+        response.headers['Content-Type'] = 'application/json'
+        return response, 500
 
 @app.route('/verify-otp', methods=['POST'])
 @limiter.limit("10 per hour")
@@ -1131,34 +1186,51 @@ def verify_otp():
     try:
         data = request.get_json()
         if not data:
-            return jsonify({"error": "Request body required"}), 400
+            response = jsonify({"error": "Request body required"})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 400
             
         recipient = data.get('recipient')
         otp = data.get('otp')
         
         if not recipient or not otp:
-            return jsonify({"error": "Recipient and OTP required"}), 400
+            response = jsonify({"error": "Recipient and OTP required"})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 400
         
         stored = otp_storage.get(recipient)
 
         if not stored:
-            return jsonify({"error": "No OTP found for this recipient. Please request a new one."}), 400
+            response = jsonify({"error": "No OTP found for this recipient. Please request a new one."})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 400
 
         stored_otp, expires_at = stored
 
         # Check expiration
         if time.time() > expires_at:
             del otp_storage[recipient]
-            return jsonify({"error": "OTP has expired. Please request a new one."}), 400
+            response = jsonify({"error": "OTP has expired. Please request a new one."})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 400
         
         if stored_otp == otp:
             # OTP is correct, remove it from storage
             del otp_storage[recipient]
-            return jsonify({"message": "OTP verified successfully", "verified": True}), 200
+            response = jsonify({"message": "OTP verified successfully", "verified": True})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 200
         else:
-            return jsonify({"error": "Invalid OTP. Please try again.", "verified": False}), 400
+            response = jsonify({"error": "Invalid OTP. Please try again.", "verified": False})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 400
     except Exception as e:
-        return handle_exception(e, {"endpoint": request.path, "method": request.method}, "An error occurred while processing your request.")
+        result = handle_exception(e, {"endpoint": request.path, "method": request.method}, "An error occurred while processing your request.")
+        if isinstance(result, tuple):
+            response, status = result
+            response.headers['Content-Type'] = 'application/json'
+            return response, status
+        return result
 
 
 
@@ -1356,16 +1428,22 @@ def login():
         # Ensure we return JSON even on errors
         # Validate input data
         if not request.is_json:
-            return jsonify({"error": "Content-Type must be application/json"}), 400
+            response = jsonify({"error": "Content-Type must be application/json"})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 400
         
         data = request.get_json()
         if not data:
-            return jsonify({"error": "Request body is required"}), 400
+            response = jsonify({"error": "Request body is required"})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 400
         
         validated_data, errors = validate_request_data(LoginSchema, data)
         
         if errors:
-            return jsonify({"error": "Validation failed", "details": errors}), 400
+            response = jsonify({"error": "Validation failed", "details": errors})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 400
         
         identifier = validated_data['identifier']
         password = validated_data['password']
@@ -1389,7 +1467,7 @@ def login():
             )
             # Log successful authentication
             log_auth_event('login', True, identifier, admin.id, 'admin', request.remote_addr)
-            return jsonify({
+            response = jsonify({
                 "message": "Login successful",
                 "token": token,
                 "role": "admin",
@@ -1397,7 +1475,9 @@ def login():
                 "username": admin.username,
                 "email": admin.email,
                 "redirect_url": "admin/home.html"
-            }), 200
+            })
+            response.headers['Content-Type'] = 'application/json'
+            return response, 200
             
         # 2. Check Customer table (email only)
         customer = Customer.query.filter_by(email=identifier).first()
@@ -1411,7 +1491,7 @@ def login():
             )
             # Log successful authentication
             log_auth_event('login', True, identifier, customer.id, 'customer', request.remote_addr)
-            return jsonify({
+            response = jsonify({
                 "message": "Login successful",
                 "token": token,
                 "role": "customer",
@@ -1420,7 +1500,9 @@ def login():
                 "email": customer.email,
                 "phone": customer.phone,
                 "redirect_url": "customer/home.html"
-            }), 200
+            })
+            response.headers['Content-Type'] = 'application/json'
+            return response, 200
             
         # 3. Check Vendor table (email only)
         vendor = Vendor.query.filter_by(email=identifier).first()
@@ -1443,7 +1525,7 @@ def login():
             redirect_url = build_subdomain_url(Config.VENDOR_SUBDOMAIN, '/', params)
             # Log successful authentication
             log_auth_event('login', True, identifier, vendor.id, 'vendor', request.remote_addr)
-            return jsonify({
+            response = jsonify({
                 "message": "Login successful",
                 "token": token,
                 "role": "vendor",
@@ -1453,7 +1535,9 @@ def login():
                 "email": vendor.email,
                 "phone": vendor.phone,
                 "redirect_url": redirect_url
-            }), 200
+            })
+            response.headers['Content-Type'] = 'application/json'
+            return response, 200
             
         # 4. Check Rider table (email only)
         rider = Rider.query.filter_by(email=identifier).first()
@@ -1476,7 +1560,7 @@ def login():
             redirect_url = build_subdomain_url(Config.RIDER_SUBDOMAIN, '/', params)
             # Log successful authentication
             log_auth_event('login', True, identifier, rider.id, 'rider', request.remote_addr)
-            return jsonify({
+            response = jsonify({
                 "message": "Login successful",
                 "token": token,
                 "role": "rider",
@@ -1486,7 +1570,9 @@ def login():
                 "phone": rider.phone,
                 "verification_status": rider.verification_status,
                 "redirect_url": redirect_url
-            }), 200
+            })
+            response.headers['Content-Type'] = 'application/json'
+            return response, 200
         
         # 5. Check Support table (email only)
         support = Support.query.filter_by(email=identifier).first()
@@ -1500,7 +1586,7 @@ def login():
             )
             # Log successful authentication
             log_auth_event('login', True, identifier, support.id, 'support', request.remote_addr)
-            return jsonify({
+            response = jsonify({
                 "message": "Login successful",
                 "token": token,
                 "role": "support",
@@ -1509,11 +1595,15 @@ def login():
                 "email": support.email,
                 "phone": support.phone,
                 "redirect_url": "support/home.html"
-            }), 200
+            })
+            response.headers['Content-Type'] = 'application/json'
+            return response, 200
 
         # Log failed authentication attempt
         log_auth_event('login', False, identifier, None, None, request.remote_addr, error="Invalid credentials")
-        return jsonify({"error": "Invalid credentials"}), 401
+        response = jsonify({"error": "Invalid credentials"})
+        response.headers['Content-Type'] = 'application/json'
+        return response, 401
     except Exception as e:
         # Log the full error for debugging
         log_error(e, {"endpoint": "/login", "method": "POST", "identifier": identifier if 'identifier' in locals() else None})
@@ -1525,7 +1615,9 @@ def login():
                 error_message = "Database connection error. Please try again later."
             elif 'Validation' in error_type or 'ValueError' in error_type:
                 error_message = "Invalid input data. Please check your credentials."
-        return jsonify({"error": error_message}), 500
+        response = jsonify({"error": error_message})
+        response.headers['Content-Type'] = 'application/json'
+        return response, 500
 
 
 # --- Rider Management Endpoints ---

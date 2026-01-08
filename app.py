@@ -1497,6 +1497,8 @@ def login():
             )
             # Log successful authentication
             log_auth_event('login', True, identifier, admin.id, 'admin', request.remote_addr)
+            # Build full URL for admin redirect
+            admin_redirect_url = f"https://apparels.impromptuindian.com/admin/home.html"
             response = jsonify({
                 "message": "Login successful",
                 "token": token,
@@ -1504,7 +1506,7 @@ def login():
                 "user_id": admin.id,
                 "username": admin.username,
                 "email": admin.email,
-                "redirect_url": "admin/home.html"
+                "redirect_url": admin_redirect_url
             })
             response.headers['Content-Type'] = 'application/json'
             return response, 200
@@ -1521,6 +1523,8 @@ def login():
             )
             # Log successful authentication
             log_auth_event('login', True, identifier, customer.id, 'customer', request.remote_addr)
+            # Build full URL for customer redirect
+            customer_redirect_url = f"https://apparels.impromptuindian.com/customer/home.html"
             response = jsonify({
                 "message": "Login successful",
                 "token": token,
@@ -1529,7 +1533,7 @@ def login():
                 "username": customer.username,
                 "email": customer.email,
                 "phone": customer.phone,
-                "redirect_url": "customer/home.html"
+                "redirect_url": customer_redirect_url
             })
             response.headers['Content-Type'] = 'application/json'
             return response, 200

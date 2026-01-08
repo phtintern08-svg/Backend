@@ -179,15 +179,15 @@ def require_self_or_role(user_id_param='user_id', *allowed_roles):
             
             # Get the user_id from route parameters or request data
             target_user_id = kwargs.get(user_id_param)
-            if not target_user_id:
+            if target_user_id is None:
                 # Try to get from request JSON
                 if request.is_json:
                     target_user_id = request.json.get(user_id_param)
                 # Try to get from form data
-                if not target_user_id:
+                if target_user_id is None:
                     target_user_id = request.form.get(user_id_param)
                 # Try to get from query params
-                if not target_user_id:
+                if target_user_id is None:
                     target_user_id = request.args.get(user_id_param)
             
             # Convert to int for comparison

@@ -1026,8 +1026,7 @@ def login_post():
                 token = generate_token(
                     user_id=admin.id,
                     role="admin",
-                    username=admin.username,
-                    email=admin.email
+                    username=admin.username
                 )
                 # Log successful authentication
                 log_auth_event('login', True, identifier, admin.id, 'admin', request.remote_addr)
@@ -1039,7 +1038,6 @@ def login_post():
                     "role": "admin",
                     "user_id": admin.id,
                     "username": admin.username,
-                    "email": admin.email,
                     "redirect_url": admin_redirect_url
                 })
                 response.headers['Content-Type'] = 'application/json'

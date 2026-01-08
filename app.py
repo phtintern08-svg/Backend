@@ -429,6 +429,55 @@ import urllib.parse
 otp_storage = {}
 OTP_TTL_SECONDS = int(os.environ.get('OTP_TTL_SECONDS', '600'))  # default 10 minutes
 
+# Application cache clearing function
+def clear_application_cache():
+    """Clear expired entries from application caches"""
+    try:
+        current_time = time.time()
+        expired_count = 0
+        
+        # Clear expired OTPs from otp_storage
+        expired_recipients = [
+            recipient for recipient, (otp, expires_at) in otp_storage.items()
+            if current_time > expires_at
+        ]
+        for recipient in expired_recipients:
+            del otp_storage[recipient]
+            expired_count += 1
+        
+        # Clear Flask session cache (if using server-side sessions)
+        # Note: This only clears expired sessions, not all sessions
+        if hasattr(app, 'session_interface'):
+            try:
+                # Clear expired sessions if using server-side session storage
+                app.session_interface.cleanup_expired_sessions()
+            except Exception:
+                pass  # Session cleanup may not be available
+        
+        # Log cache clearing activity (only if items were cleared)
+        if expired_count > 0:
+            app_logger.debug(f"Cache cleared: {expired_count} expired OTP entries removed")
+        
+    except Exception as e:
+        app_logger.error(f"Error clearing application cache: {e}")
+
+# Background thread to automatically clear cache every 60 seconds
+def cache_cleanup_worker():
+    """Background worker thread that clears application cache every 60 seconds"""
+    while True:
+        try:
+            time.sleep(60)  # Wait 60 seconds
+            clear_application_cache()
+        except Exception as e:
+            app_logger.error(f"Error in cache cleanup worker: {e}")
+            # Continue running even if there's an error
+            time.sleep(60)
+
+# Start cache cleanup thread on application startup
+cache_cleanup_thread = threading.Thread(target=cache_cleanup_worker, daemon=True)
+cache_cleanup_thread.start()
+app_logger.info("Application cache auto-cleanup started (runs every 60 seconds)")
+
 # Helper function to build URLs dynamically based on environment
 def build_subdomain_url(subdomain, path='', query_params=None):
     """
@@ -945,10 +994,201 @@ def login_page():
     """Serve the login HTML page"""
     return send_from_directory("../Frontend/apparels.impromptuindian.com", "login.html")
 
-@app.route("/login", methods=['GET']) # GET request for page, POST is handled by API route below
-def login_page_redirect():
-    """Redirect GET /login to login.html or serve the page"""
-    return send_from_directory("../Frontend/apparels.impromptuindian.com", "login.html")
+@app.route("/login", methods=['GET', 'POST']) # Handle both GET (page) and POST (API)
+@limiter.limit("5 per 15 minutes")
+@csrf.exempt  # Public endpoint - authentication handled via JWT tokens
+def login_handler():
+    """Handle both GET requests (serve page) and POST requests (authentication)"""
+    if request.method == 'GET':
+        return send_from_directory("../Frontend/apparels.impromptuindian.com", "login.html")
+    
+    # POST method - handle authentication
+    # Log that this endpoint was hit (for debugging)
+    app_logger.info(f"Login POST request received from {request.remote_addr} - Path: {request.path}, Method: {request.method}, URL: {request.url}")
+    try:
+        # Ensure we return JSON even on errors
+        # Validate input data
+        if not request.is_json:
+            response = jsonify({"error": "Content-Type must be application/json"})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 400
+        
+        data = request.get_json()
+        if not data:
+            response = jsonify({"error": "Request body is required"})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 400
+        
+        validated_data, errors = validate_request_data(LoginSchema, data)
+        
+        if errors:
+            response = jsonify({"error": "Validation failed", "details": errors})
+            response.headers['Content-Type'] = 'application/json'
+            return response, 400
+        
+        identifier = validated_data['identifier']
+        password = validated_data['password']
+        
+        # Validate email format
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        is_email = re.match(email_pattern, identifier) is not None
+            
+        # 1. Check Admin table (by email if email format, otherwise by username)
+        if is_email:
+            admin = Admin.query.filter_by(email=identifier).first()
+        else:
+            admin = Admin.query.filter_by(username=identifier).first()
+        
+        if admin and check_password_hash(admin.password_hash, password):
+            token = generate_token(
+                user_id=admin.id,
+                role="admin",
+                username=admin.username,
+                email=admin.email
+            )
+            # Log successful authentication
+            log_auth_event('login', True, identifier, admin.id, 'admin', request.remote_addr)
+            # Build full URL for admin redirect
+            admin_redirect_url = f"https://apparels.impromptuindian.com/admin/home.html"
+            response = jsonify({
+                "message": "Login successful",
+                "token": token,
+                "role": "admin",
+                "user_id": admin.id,
+                "username": admin.username,
+                "email": admin.email,
+                "redirect_url": admin_redirect_url
+            })
+            response.headers['Content-Type'] = 'application/json'
+            return response, 200
+            
+        # 2. Check Customer table (email only)
+        customer = Customer.query.filter_by(email=identifier).first()
+        if customer and check_password_hash(customer.password_hash, password):
+            token = generate_token(
+                user_id=customer.id,
+                role="customer",
+                username=customer.username,
+                email=customer.email,
+                phone=customer.phone
+            )
+            # Log successful authentication
+            log_auth_event('login', True, identifier, customer.id, 'customer', request.remote_addr)
+            # Build full URL for customer redirect
+            customer_redirect_url = f"https://apparels.impromptuindian.com/customer/home.html"
+            response = jsonify({
+                "message": "Login successful",
+                "token": token,
+                "role": "customer",
+                "user_id": customer.id,
+                "username": customer.username,
+                "email": customer.email,
+                "phone": customer.phone,
+                "redirect_url": customer_redirect_url
+            })
+            response.headers['Content-Type'] = 'application/json'
+            return response, 200
+            
+        # 3. Check Vendor table (email only)
+        vendor = Vendor.query.filter_by(email=identifier).first()
+        if vendor and check_password_hash(vendor.password_hash, password):
+            token = generate_token(
+                user_id=vendor.id,
+                role="vendor",
+                username=vendor.username,
+                email=vendor.email,
+                phone=vendor.phone
+            )
+            # Redirect to vendor subdomain home page
+            redirect_url = build_subdomain_url(Config.VENDOR_SUBDOMAIN, '/home.html')
+            # Log successful authentication
+            log_auth_event('login', True, identifier, vendor.id, 'vendor', request.remote_addr)
+            response = jsonify({
+                "message": "Login successful",
+                "token": token,
+                "role": "vendor",
+                "user_id": vendor.id,
+                "business_name": vendor.business_name,
+                "username": vendor.username,
+                "email": vendor.email,
+                "phone": vendor.phone,
+                "redirect_url": redirect_url
+            })
+            response.headers['Content-Type'] = 'application/json'
+            return response, 200
+            
+        # 4. Check Rider table (email only)
+        rider = Rider.query.filter_by(email=identifier).first()
+        if rider and check_password_hash(rider.password_hash, password):
+            token = generate_token(
+                user_id=rider.id,
+                role="rider",
+                username=rider.name,
+                email=rider.email,
+                phone=rider.phone
+            )
+            # Redirect to rider subdomain home page
+            redirect_url = build_subdomain_url(Config.RIDER_SUBDOMAIN, '/home.html')
+            # Log successful authentication
+            log_auth_event('login', True, identifier, rider.id, 'rider', request.remote_addr)
+            response = jsonify({
+                "message": "Login successful",
+                "token": token,
+                "role": "rider",
+                "user_id": rider.id,
+                "username": rider.name,
+                "email": rider.email,
+                "phone": rider.phone,
+                "verification_status": rider.verification_status,
+                "redirect_url": redirect_url
+            })
+            response.headers['Content-Type'] = 'application/json'
+            return response, 200
+        
+        # 5. Check Support table (email only)
+        support = Support.query.filter_by(email=identifier).first()
+        if support and check_password_hash(support.password_hash, password):
+            token = generate_token(
+                user_id=support.id,
+                role="support",
+                username=support.username,
+                email=support.email,
+                phone=support.phone
+            )
+            # Log successful authentication
+            log_auth_event('login', True, identifier, support.id, 'support', request.remote_addr)
+            response = jsonify({
+                "message": "Login successful",
+                "token": token,
+                "role": "support",
+                "user_id": support.id,
+                "username": support.username,
+                "email": support.email,
+                "phone": support.phone,
+                "redirect_url": "support/home.html"
+            })
+            response.headers['Content-Type'] = 'application/json'
+            return response, 200
+
+        # Log failed authentication attempt
+        log_auth_event('login', False, identifier, None, None, request.remote_addr, error="Invalid credentials")
+        response = jsonify({"error": "Invalid credentials"})
+        response.headers['Content-Type'] = 'application/json'
+        return response, 401
+    except Exception as e:
+        # Log the full error for debugging
+        log_error(e, {"endpoint": "/login", "method": "POST", "identifier": identifier if 'identifier' in locals() else None})
+        # Always return JSON, never HTML - handle_exception might return HTML in some cases
+        error_message = "Login failed. Please try again."
+        if hasattr(e, '__class__'):
+            error_type = e.__class__.__name__
+            if 'Database' in error_type or 'Connection' in error_type or 'OperationalError' in error_type:
+                error_message = "Database connection error. Please try again later."
+            elif 'Validation' in error_type or 'ValueError' in error_type:
+                error_message = "Invalid input data. Please check your credentials."
+        response = jsonify({"error": error_message})
+        response.headers['Content-Type'] = 'application/json'
+        return response, 500
 
 @app.route("/register")
 def register():
@@ -1447,197 +1687,6 @@ def register_user():
         log_auth_event('register', False, email if 'email' in locals() else None, None, None, request.remote_addr, error=str(e))
         return handle_exception(e, {"endpoint": request.path, "method": request.method}, "Invalid request. Please check your input.")
 
-@app.route('/login', methods=['POST'])
-@limiter.limit("5 per 15 minutes")
-@csrf.exempt  # Public endpoint - authentication handled via JWT tokens
-def login():
-    """Login endpoint - handles POST requests for authentication"""
-    # Log that this endpoint was hit (for debugging)
-    app_logger.info(f"Login POST request received from {request.remote_addr} - Path: {request.path}, Method: {request.method}, URL: {request.url}")
-    try:
-        # Ensure we return JSON even on errors
-        # Validate input data
-        if not request.is_json:
-            response = jsonify({"error": "Content-Type must be application/json"})
-            response.headers['Content-Type'] = 'application/json'
-            return response, 400
-        
-        data = request.get_json()
-        if not data:
-            response = jsonify({"error": "Request body is required"})
-            response.headers['Content-Type'] = 'application/json'
-            return response, 400
-        
-        validated_data, errors = validate_request_data(LoginSchema, data)
-        
-        if errors:
-            response = jsonify({"error": "Validation failed", "details": errors})
-            response.headers['Content-Type'] = 'application/json'
-            return response, 400
-        
-        identifier = validated_data['identifier']
-        password = validated_data['password']
-        
-        # Validate email format
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        is_email = re.match(email_pattern, identifier) is not None
-            
-        # 1. Check Admin table (by email if email format, otherwise by username)
-        if is_email:
-            admin = Admin.query.filter_by(email=identifier).first()
-        else:
-            admin = Admin.query.filter_by(username=identifier).first()
-        
-        if admin and check_password_hash(admin.password_hash, password):
-            token = generate_token(
-                user_id=admin.id,
-                role="admin",
-                username=admin.username,
-                email=admin.email
-            )
-            # Log successful authentication
-            log_auth_event('login', True, identifier, admin.id, 'admin', request.remote_addr)
-            # Build full URL for admin redirect
-            admin_redirect_url = f"https://apparels.impromptuindian.com/admin/home.html"
-            response = jsonify({
-                "message": "Login successful",
-                "token": token,
-                "role": "admin",
-                "user_id": admin.id,
-                "username": admin.username,
-                "email": admin.email,
-                "redirect_url": admin_redirect_url
-            })
-            response.headers['Content-Type'] = 'application/json'
-            return response, 200
-            
-        # 2. Check Customer table (email only)
-        customer = Customer.query.filter_by(email=identifier).first()
-        if customer and check_password_hash(customer.password_hash, password):
-            token = generate_token(
-                user_id=customer.id,
-                role="customer",
-                username=customer.username,
-                email=customer.email,
-                phone=customer.phone
-            )
-            # Log successful authentication
-            log_auth_event('login', True, identifier, customer.id, 'customer', request.remote_addr)
-            # Build full URL for customer redirect
-            customer_redirect_url = f"https://apparels.impromptuindian.com/customer/home.html"
-            response = jsonify({
-                "message": "Login successful",
-                "token": token,
-                "role": "customer",
-                "user_id": customer.id,
-                "username": customer.username,
-                "email": customer.email,
-                "phone": customer.phone,
-                "redirect_url": customer_redirect_url
-            })
-            response.headers['Content-Type'] = 'application/json'
-            return response, 200
-            
-        # 3. Check Vendor table (email only)
-        vendor = Vendor.query.filter_by(email=identifier).first()
-        if vendor and check_password_hash(vendor.password_hash, password):
-            token = generate_token(
-                user_id=vendor.id,
-                role="vendor",
-                username=vendor.username,
-                email=vendor.email,
-                phone=vendor.phone
-            )
-            # Redirect to vendor subdomain home page
-            redirect_url = build_subdomain_url(Config.VENDOR_SUBDOMAIN, '/home.html')
-            # Log successful authentication
-            log_auth_event('login', True, identifier, vendor.id, 'vendor', request.remote_addr)
-            response = jsonify({
-                "message": "Login successful",
-                "token": token,
-                "role": "vendor",
-                "user_id": vendor.id,
-                "business_name": vendor.business_name,
-                "username": vendor.username,
-                "email": vendor.email,
-                "phone": vendor.phone,
-                "redirect_url": redirect_url
-            })
-            response.headers['Content-Type'] = 'application/json'
-            return response, 200
-            
-        # 4. Check Rider table (email only)
-        rider = Rider.query.filter_by(email=identifier).first()
-        if rider and check_password_hash(rider.password_hash, password):
-            token = generate_token(
-                user_id=rider.id,
-                role="rider",
-                username=rider.name,
-                email=rider.email,
-                phone=rider.phone
-            )
-            # Redirect to rider subdomain home page
-            redirect_url = build_subdomain_url(Config.RIDER_SUBDOMAIN, '/home.html')
-            # Log successful authentication
-            log_auth_event('login', True, identifier, rider.id, 'rider', request.remote_addr)
-            response = jsonify({
-                "message": "Login successful",
-                "token": token,
-                "role": "rider",
-                "user_id": rider.id,
-                "username": rider.name,
-                "email": rider.email,
-                "phone": rider.phone,
-                "verification_status": rider.verification_status,
-                "redirect_url": redirect_url
-            })
-            response.headers['Content-Type'] = 'application/json'
-            return response, 200
-        
-        # 5. Check Support table (email only)
-        support = Support.query.filter_by(email=identifier).first()
-        if support and check_password_hash(support.password_hash, password):
-            token = generate_token(
-                user_id=support.id,
-                role="support",
-                username=support.username,
-                email=support.email,
-                phone=support.phone
-            )
-            # Log successful authentication
-            log_auth_event('login', True, identifier, support.id, 'support', request.remote_addr)
-            response = jsonify({
-                "message": "Login successful",
-                "token": token,
-                "role": "support",
-                "user_id": support.id,
-                "username": support.username,
-                "email": support.email,
-                "phone": support.phone,
-                "redirect_url": "support/home.html"
-            })
-            response.headers['Content-Type'] = 'application/json'
-            return response, 200
-
-        # Log failed authentication attempt
-        log_auth_event('login', False, identifier, None, None, request.remote_addr, error="Invalid credentials")
-        response = jsonify({"error": "Invalid credentials"})
-        response.headers['Content-Type'] = 'application/json'
-        return response, 401
-    except Exception as e:
-        # Log the full error for debugging
-        log_error(e, {"endpoint": "/login", "method": "POST", "identifier": identifier if 'identifier' in locals() else None})
-        # Always return JSON, never HTML - handle_exception might return HTML in some cases
-        error_message = "Login failed. Please try again."
-        if hasattr(e, '__class__'):
-            error_type = e.__class__.__name__
-            if 'Database' in error_type or 'Connection' in error_type or 'OperationalError' in error_type:
-                error_message = "Database connection error. Please try again later."
-            elif 'Validation' in error_type or 'ValueError' in error_type:
-                error_message = "Invalid input data. Please check your credentials."
-        response = jsonify({"error": error_message})
-        response.headers['Content-Type'] = 'application/json'
-        return response, 500
 
 
 # --- Rider Management Endpoints ---

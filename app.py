@@ -1014,15 +1014,12 @@ def login_post():
         identifier = validated_data['identifier']
         password = validated_data['password']
         
-        # Validate email format
+        # Validate email format (for Customer, Vendor, Rider, Support)
         email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         is_email = re.match(email_pattern, identifier) is not None
         
-        # 1. Check Admin table (by email if email format, otherwise by username)
-        if is_email:
-            admin = Admin.query.filter_by(email=identifier).first()
-        else:
-            admin = Admin.query.filter_by(username=identifier).first()
+        # 1. Check Admin table (by username only - Admin uses username, not email)
+        admin = Admin.query.filter_by(username=identifier).first()
         
         if admin:
             if check_password_hash(admin.password_hash, password):

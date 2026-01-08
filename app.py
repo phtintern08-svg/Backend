@@ -1424,6 +1424,9 @@ def register_user():
 @limiter.limit("5 per 15 minutes")
 @csrf.exempt  # Public endpoint - authentication handled via JWT tokens
 def login():
+    """Login endpoint - handles POST requests for authentication"""
+    # Log that this endpoint was hit (for debugging)
+    app_logger.info(f"Login POST request received from {request.remote_addr}")
     try:
         # Ensure we return JSON even on errors
         # Validate input data

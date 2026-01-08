@@ -455,7 +455,7 @@ def db_query_with_retry(query_func, max_retries=3):
                 if retry_count < max_retries:
                     app_logger.warning(f"Database connection error (attempt {retry_count}/{max_retries}): {error_msg}. Retrying...")
                     db.session.rollback()
-                    db.session.remove()  # Remove the broken session
+                    # DO NOT call db.session.remove() here - teardown hook handles it
                     time.sleep(0.5)  # Brief delay before retry
                     continue
                 else:
@@ -6431,6 +6431,14 @@ def database_health_check():
         
     except Exception as e:
         return handle_exception(e, {"endpoint": "/api/health/database"}, "Database health check failed")
+
+# CRITICAL: Teardown hook for safe session cleanup (ONLY place where session.remove() is allowed)
+@app.teardown_appcontext
+def shutdown_session(exception=None):
+    """Safely remove database session after request completes"""
+    # This is the ONLY place where db.session.remove() should be called
+    # Passenger-safe, thread-safe, pool-safe
+    db.session.remove()
 
 # Test endpoint to verify routing works
 @app.route('/api/test', methods=['GET', 'POST'])

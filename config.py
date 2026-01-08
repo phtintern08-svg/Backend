@@ -91,8 +91,8 @@ class Config:
     DB_CONNECT_TIMEOUT = int(os.environ.get('DB_CONNECT_TIMEOUT', 10))  # 10 seconds connection timeout
     
     SQLALCHEMY_ENGINE_OPTIONS = {
-        'pool_pre_ping': True,  # Verify connections before using
-        'pool_recycle': DB_POOL_RECYCLE,  # Recycle connections after this time
+        'pool_pre_ping': True,  # Verify connections before using (MANDATORY for Passenger)
+        'pool_recycle': 280,  # Recycle connections after 280 seconds (MANDATORY for Passenger/MySQL)
         'pool_size': DB_POOL_SIZE,  # Number of connections to maintain
         'max_overflow': DB_MAX_OVERFLOW,  # Max additional connections beyond pool_size
         'pool_timeout': DB_POOL_TIMEOUT,  # Timeout when getting connection from pool

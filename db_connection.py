@@ -1,6 +1,17 @@
 """
 Database Connection Management
 Provides connection retry logic and health monitoring
+
+⚠️ CRITICAL: DO NOT IMPORT THIS MODULE IN FLASK APP
+This module contains raw SQLAlchemy engine management that conflicts with Flask-SQLAlchemy.
+
+Flask-SQLAlchemy automatically manages engines and connections.
+Mixing both causes "connection is closed" errors in Passenger workers.
+
+✅ CORRECT: Use only Flask-SQLAlchemy
+❌ WRONG: Import create_engine_with_retry or use manual engines
+
+This file is kept for reference only - not used in the Flask application.
 """
 import time
 import logging
@@ -52,25 +63,15 @@ def create_engine_with_retry(database_uri: str, engine_options: dict, max_retrie
     raise ConnectionError(f"Failed to establish database connection after {max_retries} attempts")
 
 
-@event.listens_for(Engine, "connect")
-def set_mysql_session_vars(dbapi_conn, connection_record):
-    """Set connection-level settings (for MySQL) - PyMySQL compatible"""
-    # This is called for each new connection
-    try:
-        # PyMySQL requires cursor for executing SQL
-        cursor = dbapi_conn.cursor()
-        cursor.execute("SET SESSION sql_mode='STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION'")
-        cursor.execute("SET SESSION time_zone='+00:00'")  # UTC timezone
-        cursor.close()
-    except Exception:
-        # Ignore errors (might not be MySQL or connection might be in bad state)
-        pass
-
-
-@event.listens_for(Pool, "connect")
-def receive_connect(dbapi_conn, connection_record):
-    """Called when a new connection is established"""
-    log_info("New database connection established")
+# REMOVED: Global event listeners - these interfere with Flask-SQLAlchemy's engine management
+# Flask-SQLAlchemy manages engines and connections automatically
+# Adding global listeners causes conflicts in Passenger workers with multiple engines
+#
+# If you need connection-level settings, configure them via SQLALCHEMY_ENGINE_OPTIONS
+# in config.py using connect_args or pool_pre_ping
+#
+# @event.listens_for(Engine, "connect")  # ❌ REMOVED - conflicts with Flask-SQLAlchemy
+# @event.listens_for(Pool, "connect")    # ❌ REMOVED - conflicts with Flask-SQLAlchemy
 
 
 # REMOVED: checkout handler - pool_pre_ping handles connection validation automatically

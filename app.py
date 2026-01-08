@@ -151,19 +151,15 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = Config.SQLALCHEMY_ENGINE_OPTIONS
 
 db.init_app(app)
 
-# CRITICAL: Verify engine options were applied (for debugging)
-if hasattr(db, 'get_engine'):
-    try:
-        main_engine = db.get_engine()
-        app_logger.info(f"Main engine pool_pre_ping: {main_engine.pool._pre_ping}")
-        app_logger.info(f"Main engine pool_recycle: {main_engine.pool._recycle}")
-    except Exception as e:
-        app_logger.warning(f"Could not verify engine options: {e}")
+# Engine options are configured via SQLALCHEMY_ENGINE_OPTIONS in config.py
+# Flask-SQLAlchemy automatically applies these to all engines (main + binds)
+# No manual engine access needed - Flask-SQLAlchemy manages everything
+
 ma.init_app(app)
 mail = Mail(app)
 
-# Import database connection utilities for health checks
-from db_connection import check_database_health, get_pool_status
+# REMOVED: db_connection imports - mixing Flask-SQLAlchemy with raw SQLAlchemy causes conflicts
+# Flask-SQLAlchemy manages engines automatically - no manual engine creation needed
 
 # Initialize CSRF Protection
 csrf = CSRFProtect(app)
@@ -1028,7 +1024,8 @@ def login_post():
         else:
             admin = Admin.query.filter_by(username=identifier).first()
         
-        if admin and check_password_hash(admin.password_hash, password):
+        if admin:
+            if check_password_hash(admin.password_hash, password):
             token = generate_token(
                 user_id=admin.id,
                 role="admin",
@@ -1048,12 +1045,18 @@ def login_post():
                 "email": admin.email,
                 "redirect_url": admin_redirect_url
             })
+                response.headers['Content-Type'] = 'application/json'
+                return response, 200
+            # Admin found but password wrong - return immediately (don't check other tables)
+            log_auth_event('login', False, identifier, None, None, request.remote_addr, error="Invalid credentials")
+            response = jsonify({"error": "Invalid credentials"})
             response.headers['Content-Type'] = 'application/json'
-            return response, 200
+            return response, 401
             
-        # 2. Check Customer table (email only)
+        # 2. Check Customer table (email only) - only if admin not found
         customer = Customer.query.filter_by(email=identifier).first()
-        if customer and check_password_hash(customer.password_hash, password):
+        if customer:
+            if check_password_hash(customer.password_hash, password):
             token = generate_token(
                 user_id=customer.id,
                 role="customer",
@@ -1075,12 +1078,18 @@ def login_post():
                 "phone": customer.phone,
                 "redirect_url": customer_redirect_url
             })
+                response.headers['Content-Type'] = 'application/json'
+                return response, 200
+            # Customer found but password wrong - return immediately
+            log_auth_event('login', False, identifier, None, None, request.remote_addr, error="Invalid credentials")
+            response = jsonify({"error": "Invalid credentials"})
             response.headers['Content-Type'] = 'application/json'
-            return response, 200
+            return response, 401
             
-        # 3. Check Vendor table (email only)
+        # 3. Check Vendor table (email only) - only if customer not found
         vendor = Vendor.query.filter_by(email=identifier).first()
-        if vendor and check_password_hash(vendor.password_hash, password):
+        if vendor:
+            if check_password_hash(vendor.password_hash, password):
             token = generate_token(
                 user_id=vendor.id,
                 role="vendor",
@@ -1103,12 +1112,18 @@ def login_post():
                 "phone": vendor.phone,
                 "redirect_url": redirect_url
             })
+                response.headers['Content-Type'] = 'application/json'
+                return response, 200
+            # Vendor found but password wrong - return immediately
+            log_auth_event('login', False, identifier, None, None, request.remote_addr, error="Invalid credentials")
+            response = jsonify({"error": "Invalid credentials"})
             response.headers['Content-Type'] = 'application/json'
-            return response, 200
+            return response, 401
             
-        # 4. Check Rider table (email only)
+        # 4. Check Rider table (email only) - only if vendor not found
         rider = Rider.query.filter_by(email=identifier).first()
-        if rider and check_password_hash(rider.password_hash, password):
+        if rider:
+            if check_password_hash(rider.password_hash, password):
             token = generate_token(
                 user_id=rider.id,
                 role="rider",
@@ -1131,12 +1146,18 @@ def login_post():
                 "verification_status": rider.verification_status,
                 "redirect_url": redirect_url
             })
+                response.headers['Content-Type'] = 'application/json'
+                return response, 200
+            # Rider found but password wrong - return immediately
+            log_auth_event('login', False, identifier, None, None, request.remote_addr, error="Invalid credentials")
+            response = jsonify({"error": "Invalid credentials"})
             response.headers['Content-Type'] = 'application/json'
-            return response, 200
+            return response, 401
         
-        # 5. Check Support table (email only)
+        # 5. Check Support table (email only) - only if rider not found
         support = Support.query.filter_by(email=identifier).first()
-        if support and check_password_hash(support.password_hash, password):
+        if support:
+            if check_password_hash(support.password_hash, password):
             token = generate_token(
                 user_id=support.id,
                 role="support",
@@ -1156,24 +1177,40 @@ def login_post():
                 "phone": support.phone,
                 "redirect_url": "support/home.html"
             })
+                response.headers['Content-Type'] = 'application/json'
+                return response, 200
+            # Support found but password wrong - return immediately
+            log_auth_event('login', False, identifier, None, None, request.remote_addr, error="Invalid credentials")
+            response = jsonify({"error": "Invalid credentials"})
             response.headers['Content-Type'] = 'application/json'
-            return response, 200
+            return response, 401
 
-        # Log failed authentication attempt
+        # No user found in any table
         log_auth_event('login', False, identifier, None, None, request.remote_addr, error="Invalid credentials")
         response = jsonify({"error": "Invalid credentials"})
         response.headers['Content-Type'] = 'application/json'
         return response, 401
     except Exception as e:
-        # Log the full error for debugging
+        # CRITICAL: Log ONLY to file/stderr - NEVER touch database/ORM in except block
+        # This prevents session invalidation from poisoning the Passenger worker
         error_type = type(e).__name__
         error_msg = str(e)
-        log_error(e, {"endpoint": "/login", "method": "POST", "identifier": identifier if 'identifier' in locals() else None})
         
-        # Always return JSON, never HTML
+        # Use app_logger directly - does NOT touch database
+        app_logger.exception(
+            "Login error",
+            extra={
+                "endpoint": "/login",
+                "method": "POST",
+                "identifier": locals().get("identifier"),
+                "remote_addr": request.remote_addr,
+                "error_type": error_type,
+                "error_message": error_msg
+            }
+        )
+        
+        # Determine user-friendly error message
         if 'InvalidRequestError' in error_type and 'connection is closed' in error_msg.lower():
-            # Database connection pool issue - this is a server configuration problem
-            app_logger.critical(f"CRITICAL: Database connection pool error - connections are being closed immediately. Check engine options and pool configuration.")
             error_message = "Database connection error. The server is experiencing connection issues. Please try again in a moment."
         elif 'Database' in error_type or 'Connection' in error_type or 'OperationalError' in error_type:
             error_message = "Database connection error. Please try again later."
@@ -6376,11 +6413,11 @@ def health_check():
             "environment": Config.ENV
         }
         
-        # Basic database connectivity check (lightweight)
+        # Basic database connectivity check (lightweight) - using Flask-SQLAlchemy session only
         try:
-            engine = db.get_engine()
-            with engine.connect() as conn:
-                conn.execute("SELECT 1")
+            # Use Flask-SQLAlchemy session - no manual engine access
+            from sqlalchemy import text
+            db.session.execute(text("SELECT 1"))
             health_status["database"] = "connected"
         except Exception as db_error:
             health_status["status"] = "degraded"
@@ -6401,22 +6438,27 @@ def health_check():
 @app.route('/api/health/database', methods=['GET'])
 @require_role('admin')  # Only admins can check detailed database health
 def database_health_check():
-    """Check database connection health and pool status"""
+    """Check database connection health - using Flask-SQLAlchemy only"""
     try:
-        # Check main database
-        engine = db.get_engine()
-        is_healthy, message = check_database_health(engine)
-        pool_status = get_pool_status(engine)
+        # Simple health check using Flask-SQLAlchemy session
+        # No manual engine access - Flask-SQLAlchemy manages this
+        from sqlalchemy import text
+        db.session.execute(text("SELECT 1"))
         
         return jsonify({
-            "status": "healthy" if is_healthy else "unhealthy",
-            "message": message,
-            "pool_status": pool_status,
+            "status": "healthy",
+            "message": "Database connection is healthy",
             "timestamp": datetime.utcnow().isoformat()
-        }), 200 if is_healthy else 503
+        }), 200
         
     except Exception as e:
-        return handle_exception(e, {"endpoint": "/api/health/database"}, "Database health check failed")
+        # Log without touching DB
+        app_logger.exception("Database health check failed", extra={"endpoint": "/api/health/database"})
+        return jsonify({
+            "status": "unhealthy",
+            "message": "Database health check failed",
+            "timestamp": datetime.utcnow().isoformat()
+        }), 503
 
 # CRITICAL: Teardown hook for safe session cleanup (ONLY place where session.remove() is allowed)
 @app.teardown_appcontext

@@ -74,12 +74,10 @@ def receive_connect(dbapi_conn, connection_record):
 @event.listens_for(Pool, "checkout")
 def receive_checkout(dbapi_conn, connection_record, connection_proxy):
     """Called when a connection is checked out from the pool"""
-    # Verify connection is still alive
-    try:
-        dbapi_conn.execute("SELECT 1")
-    except Exception as e:
-        # Connection is dead, raise DisconnectionError to trigger pool invalidation
-        raise DisconnectionError("Connection is dead") from e
+    # pool_pre_ping is enabled in config, so SQLAlchemy automatically checks connections
+    # This handler is kept for logging purposes only
+    # If connection is dead, pool_pre_ping will automatically recreate it
+    pass
 
 
 def check_database_health(engine):

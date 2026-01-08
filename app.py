@@ -423,11 +423,50 @@ import time
 import sys
 import threading
 import urllib.parse
+from sqlalchemy.exc import InvalidRequestError, DisconnectionError, OperationalError
 
 # In-memory storage for OTPs (for demonstration purposes only)
 # Structure: { recipient: (otp, expires_at_timestamp) }
 otp_storage = {}
 OTP_TTL_SECONDS = int(os.environ.get('OTP_TTL_SECONDS', '600'))  # default 10 minutes
+
+# Helper function for database queries with connection retry
+def db_query_with_retry(query_func, max_retries=3):
+    """
+    Execute a database query with automatic retry on connection errors
+    
+    Args:
+        query_func: A callable that executes the database query
+        max_retries: Maximum number of retry attempts
+        
+    Returns:
+        The result of the query function
+    """
+    retry_count = 0
+    while retry_count < max_retries:
+        try:
+            db.session.expire_all()  # Refresh session
+            result = query_func()
+            return result
+        except (InvalidRequestError, DisconnectionError, OperationalError) as db_error:
+            retry_count += 1
+            error_msg = str(db_error)
+            if 'connection is closed' in error_msg.lower() or 'InvalidRequestError' in str(type(db_error)):
+                if retry_count < max_retries:
+                    app_logger.warning(f"Database connection error (attempt {retry_count}/{max_retries}): {error_msg}. Retrying...")
+                    db.session.rollback()
+                    db.session.remove()  # Remove the broken session
+                    time.sleep(0.5)  # Brief delay before retry
+                    continue
+                else:
+                    app_logger.error(f"Database connection failed after {max_retries} attempts: {error_msg}")
+                    raise
+            else:
+                # Not a connection error, re-raise immediately
+                raise
+        except Exception as e:
+            # Other errors, re-raise immediately
+            raise
 
 # Application cache clearing function
 def clear_application_cache():
@@ -1003,12 +1042,12 @@ def login_post():
         # Validate email format
         email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         is_email = re.match(email_pattern, identifier) is not None
-            
+        
         # 1. Check Admin table (by email if email format, otherwise by username)
         if is_email:
-            admin = Admin.query.filter_by(email=identifier).first()
+            admin = db_query_with_retry(lambda: Admin.query.filter_by(email=identifier).first())
         else:
-            admin = Admin.query.filter_by(username=identifier).first()
+            admin = db_query_with_retry(lambda: Admin.query.filter_by(username=identifier).first())
         
         if admin and check_password_hash(admin.password_hash, password):
             token = generate_token(
@@ -1034,7 +1073,7 @@ def login_post():
             return response, 200
             
         # 2. Check Customer table (email only)
-        customer = Customer.query.filter_by(email=identifier).first()
+        customer = db_query_with_retry(lambda: Customer.query.filter_by(email=identifier).first())
         if customer and check_password_hash(customer.password_hash, password):
             token = generate_token(
                 user_id=customer.id,
@@ -1061,7 +1100,7 @@ def login_post():
             return response, 200
             
         # 3. Check Vendor table (email only)
-        vendor = Vendor.query.filter_by(email=identifier).first()
+        vendor = db_query_with_retry(lambda: Vendor.query.filter_by(email=identifier).first())
         if vendor and check_password_hash(vendor.password_hash, password):
             token = generate_token(
                 user_id=vendor.id,
@@ -1089,7 +1128,7 @@ def login_post():
             return response, 200
             
         # 4. Check Rider table (email only)
-        rider = Rider.query.filter_by(email=identifier).first()
+        rider = db_query_with_retry(lambda: Rider.query.filter_by(email=identifier).first())
         if rider and check_password_hash(rider.password_hash, password):
             token = generate_token(
                 user_id=rider.id,
@@ -1117,7 +1156,7 @@ def login_post():
             return response, 200
         
         # 5. Check Support table (email only)
-        support = Support.query.filter_by(email=identifier).first()
+        support = db_query_with_retry(lambda: Support.query.filter_by(email=identifier).first())
         if support and check_password_hash(support.password_hash, password):
             token = generate_token(
                 user_id=support.id,

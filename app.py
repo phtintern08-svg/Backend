@@ -2,9 +2,13 @@ from flask import Flask, request, jsonify, send_from_directory, send_file, sessi
 from datetime import datetime, timedelta
 import os
 import json
+import re
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load environment variables from .env file in Backend directory
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ENV_PATH = os.path.join(BASE_DIR, '.env')
+load_dotenv(dotenv_path=ENV_PATH)
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
@@ -114,17 +118,17 @@ app.config.from_object(Config)
 # Apply ProxyFix for proper header handling (X-Forwarded-Proto, etc.) behind Nginx/ELB
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
-# Use absolute path for uploads
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Use absolute path for uploads (BASE_DIR already defined above)
 app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, '../Frontend/apparels.impromptuindian.com/uploads')
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Flask-Mail Configuration (all values from environment in production)
+# Flask-Mail Configuration (all values from .env file in Backend directory)
+# These values are loaded from environment variables set in .env file
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
 app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', '587'))
 app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'true').lower() == 'true'
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')  # From .env file
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')  # From .env file
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER') or app.config['MAIL_USERNAME']
 app.config['MAIL_TIMEOUT'] = 5  # 5 second timeout for email
 app.config['MAIL_USE_SSL'] = False
@@ -251,6 +255,24 @@ def set_security_headers(response):
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     
     return response
+
+# Global Error Handlers - Ensure API routes always return JSON, not HTML
+@app.errorhandler(404)
+def not_found(error):
+    """Handle 404 errors - return JSON for API routes"""
+    if request.path.startswith('/api/') or request.method == 'POST' and (request.path.startswith('/login') or request.path.startswith('/register')):
+        return jsonify({"error": "Endpoint not found"}), 404
+    # For other routes, let Flask handle normally (for serving HTML pages)
+    return error
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 errors - return JSON for API routes"""
+    if request.path.startswith('/api/') or request.method == 'POST' and (request.path.startswith('/login') or request.path.startswith('/register')):
+        log_error(error, {"endpoint": request.path, "method": request.method})
+        return jsonify({"error": "Internal server error. Please try again later."}), 500
+    # For other routes, let Flask handle normally
+    return error
 
 # CORS Configuration (JSONP is preferred for cross-origin, CORS as fallback)
 # JSONP support is implemented via jsonp_handler.py
@@ -975,23 +997,53 @@ def send_otp():
 
         try:
             if type_ == 'email':
+                # Validate email format
+                email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+                if not re.match(email_pattern, recipient):
+                    return jsonify({"error": "Invalid email address format"}), 400
+                
+                # Check if SMTP is configured
+                if not app.config.get('MAIL_USERNAME') or not app.config.get('MAIL_PASSWORD'):
+                    log_error(Exception("SMTP not configured"), {"recipient": recipient, "error_type": "SMTP_NOT_CONFIGURED"})
+                    return jsonify({"error": "Email service is not configured. Please contact support."}), 500
+                
                 # Send email in background thread to avoid blocking
                 def send_email_async():
                     try:
                         with app.app_context():
                             msg = Message(
-                                subject='Your Threadly OTP Code',
+                                subject='Your ImpromptuIndian OTP Code',
                                 recipients=[recipient],
-                                body=f'Your OTP code is: {otp}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this code, please ignore this email.'
+                                body=f'Your OTP code is: {otp}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this code, please ignore this email.\n\nBest regards,\nImpromptuIndian Team'
                             )
                             mail.send(msg)
-                    except Exception:
-                        pass  # Email sending failed, but don't block the response
+                            log_info(f"OTP email sent successfully to {recipient}", {
+                                "otp_sent": True,
+                                "recipient": recipient,
+                                "type": "email"
+                            })
+                    except Exception as email_err:
+                        log_error(email_err, {
+                            "recipient": recipient,
+                            "error_type": "EMAIL_SENDING_FAILED",
+                            "type": "email"
+                        })
+                        # Update OTP log status to failed
+                        try:
+                            otp_log = OTPLog.query.filter_by(recipient=recipient, otp_code=otp).order_by(OTPLog.created_at.desc()).first()
+                            if otp_log:
+                                otp_log.status = 'failed'
+                                db.session.commit()
+                        except Exception:
+                            db.session.rollback()
                 
                 # Start email thread (non-blocking)
                 email_thread = threading.Thread(target=send_email_async)
                 email_thread.daemon = True
                 email_thread.start()
+                
+                # Return success immediately (email is sent asynchronously)
+                return jsonify({"message": f"OTP sent successfully to {recipient}"}), 200
 
             # Phone OTP via MSG91 - DISABLED
             # elif type_ == 'phone':
@@ -1055,10 +1107,17 @@ def send_otp():
             elif type_ == 'phone':
                 # Phone OTP is disabled - return error
                 return jsonify({"error": "Phone OTP authentication is currently disabled. Please use email for OTP verification."}), 400
-        
-            return jsonify({"message": f"OTP sent successfully to {recipient}"}), 200
-        except Exception:
-            # Still return success since OTP is generated
+            else:
+                # Invalid type
+                return jsonify({"error": "Invalid OTP type. Use 'email' or 'phone'."}), 400
+                
+        except Exception as send_err:
+            # Log the error but still return success since OTP is generated and stored
+            log_error(send_err, {
+                "recipient": recipient,
+                "type": type_,
+                "error_type": "OTP_SENDING_ERROR"
+            })
             return jsonify({"message": f"OTP sent successfully to {recipient}"}), 200
             
     except Exception as e:
@@ -1293,8 +1352,15 @@ def register_user():
 @csrf.exempt  # Public endpoint - authentication handled via JWT tokens
 def login():
     try:
+        # Ensure we return JSON even on errors
         # Validate input data
-        data = request.get_json() or {}
+        if not request.is_json:
+            return jsonify({"error": "Content-Type must be application/json"}), 400
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body is required"}), 400
+        
         validated_data, errors = validate_request_data(LoginSchema, data)
         
         if errors:
@@ -1415,7 +1481,17 @@ def login():
         log_auth_event('login', False, identifier, None, None, request.remote_addr, error="Invalid credentials")
         return jsonify({"error": "Invalid credentials"}), 401
     except Exception as e:
-        return handle_exception(e, {"endpoint": "/login", "method": "POST"}, "Login failed. Please try again.")
+        # Log the full error for debugging
+        log_error(e, {"endpoint": "/login", "method": "POST", "identifier": identifier if 'identifier' in locals() else None})
+        # Always return JSON, never HTML - handle_exception might return HTML in some cases
+        error_message = "Login failed. Please try again."
+        if hasattr(e, '__class__'):
+            error_type = e.__class__.__name__
+            if 'Database' in error_type or 'Connection' in error_type or 'OperationalError' in error_type:
+                error_message = "Database connection error. Please try again later."
+            elif 'Validation' in error_type or 'ValueError' in error_type:
+                error_message = "Invalid input data. Please check your credentials."
+        return jsonify({"error": error_message}), 500
 
 
 # --- Rider Management Endpoints ---

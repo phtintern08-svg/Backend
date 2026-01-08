@@ -257,6 +257,19 @@ def set_security_headers(response):
     
     return response
 
+# Before request handler to log all requests (for debugging routing issues)
+@app.before_request
+def log_request_details():
+    """Log request details for debugging routing issues"""
+    if request.path == '/login' and request.method == 'POST':
+        app_logger.info(f"=== LOGIN REQUEST DEBUG ===")
+        app_logger.info(f"Path: {request.path}")
+        app_logger.info(f"Method: {request.method}")
+        app_logger.info(f"URL: {request.url}")
+        app_logger.info(f"Remote Addr: {request.remote_addr}")
+        app_logger.info(f"Content-Type: {request.content_type}")
+        app_logger.info(f"========================")
+
 # Helper function to check if request expects JSON response
 def expects_json():
     """Check if the request expects a JSON response"""
@@ -285,8 +298,16 @@ def expects_json():
 @app.errorhandler(404)
 def not_found(error):
     """Handle 404 errors - return JSON for API routes"""
+    # Log 404 errors for debugging
+    if request.path == '/login' and request.method == 'POST':
+        app_logger.error(f"404 ERROR: /login POST route not found! Path: {request.path}, Method: {request.method}, URL: {request.url}")
+        app_logger.error(f"Available routes containing 'login':")
+        for rule in app.url_map.iter_rules():
+            if 'login' in rule.rule.lower():
+                app_logger.error(f"  - {rule.rule} | Methods: {list(rule.methods)} | Endpoint: {rule.endpoint}")
+    
     if expects_json():
-        response = jsonify({"error": "Endpoint not found"})
+        response = jsonify({"error": "Endpoint not found", "path": request.path, "method": request.method})
         response.headers['Content-Type'] = 'application/json'
         return response, 404
     # For other routes, let Flask handle normally (for serving HTML pages)
@@ -919,8 +940,14 @@ def support():
 def terms():
     return send_from_directory("../Frontend/apparels.impromptuindian.com", "terms.html")
 
-@app.route("/login", methods=['GET']) # GET request for page, POST is handled by API route below
+@app.route("/login.html", methods=['GET']) # Serve login page HTML
 def login_page():
+    """Serve the login HTML page"""
+    return send_from_directory("../Frontend/apparels.impromptuindian.com", "login.html")
+
+@app.route("/login", methods=['GET']) # GET request for page, POST is handled by API route below
+def login_page_redirect():
+    """Redirect GET /login to login.html or serve the page"""
     return send_from_directory("../Frontend/apparels.impromptuindian.com", "login.html")
 
 @app.route("/register")
@@ -1426,7 +1453,7 @@ def register_user():
 def login():
     """Login endpoint - handles POST requests for authentication"""
     # Log that this endpoint was hit (for debugging)
-    app_logger.info(f"Login POST request received from {request.remote_addr}")
+    app_logger.info(f"Login POST request received from {request.remote_addr} - Path: {request.path}, Method: {request.method}, URL: {request.url}")
     try:
         # Ensure we return JSON even on errors
         # Validate input data
@@ -1517,15 +1544,8 @@ def login():
                 email=vendor.email,
                 phone=vendor.phone
             )
-            params = {
-                'user_id': str(vendor.id),
-                'role': 'vendor',
-                'username': str(vendor.username),
-                'email': str(vendor.email),
-                'phone': str(vendor.phone or ''),
-                'token': token
-            }
-            redirect_url = build_subdomain_url(Config.VENDOR_SUBDOMAIN, '/', params)
+            # Redirect to vendor subdomain home page
+            redirect_url = build_subdomain_url(Config.VENDOR_SUBDOMAIN, '/home.html')
             # Log successful authentication
             log_auth_event('login', True, identifier, vendor.id, 'vendor', request.remote_addr)
             response = jsonify({
@@ -1552,15 +1572,8 @@ def login():
                 email=rider.email,
                 phone=rider.phone
             )
-            params = {
-                'user_id': str(rider.id),
-                'role': 'rider',
-                'username': str(rider.name),
-                'email': str(rider.email),
-                'phone': str(rider.phone or ''),
-                'token': token
-            }
-            redirect_url = build_subdomain_url(Config.RIDER_SUBDOMAIN, '/', params)
+            # Redirect to rider subdomain home page
+            redirect_url = build_subdomain_url(Config.RIDER_SUBDOMAIN, '/home.html')
             # Log successful authentication
             log_auth_event('login', True, identifier, rider.id, 'rider', request.remote_addr)
             response = jsonify({
@@ -6324,6 +6337,39 @@ def database_health_check():
     except Exception as e:
         return handle_exception(e, {"endpoint": "/api/health/database"}, "Database health check failed")
 
+# Test endpoint to verify routing works
+@app.route('/api/test', methods=['GET', 'POST'])
+def test_endpoint():
+    """Simple test endpoint to verify Flask routing is working"""
+    return jsonify({
+        "status": "ok",
+        "message": "Flask routing is working",
+        "method": request.method,
+        "path": request.path,
+        "timestamp": datetime.utcnow().isoformat()
+    }), 200
+
 # WSGI Application Object for Passenger/cPanel
 # This is what Passenger looks for when loading the application
 application = app
+
+# Log registered routes for debugging (only routes containing 'login')
+if os.environ.get('ENV') == 'production':
+    try:
+        app_logger.info("=== Checking Login Routes ===")
+        login_routes = []
+        for rule in app.url_map.iter_rules():
+            if 'login' in rule.rule.lower():
+                login_routes.append({
+                    'rule': rule.rule,
+                    'methods': list(rule.methods),
+                    'endpoint': rule.endpoint
+                })
+        if login_routes:
+            for route in login_routes:
+                app_logger.info(f"Login Route Found: {route['rule']} | Methods: {route['methods']} | Endpoint: {route['endpoint']}")
+        else:
+            app_logger.warning("No login routes found in registered routes!")
+        app_logger.info("=== End Login Route Check ===")
+    except Exception as e:
+        app_logger.error(f"Error logging routes: {e}")

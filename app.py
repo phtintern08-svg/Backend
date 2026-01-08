@@ -47,6 +47,7 @@ from models import (
     OTPLog,
     VendorOrderAssignment,
     OrderStatusHistory,
+    Support,
 )
 from schemas import (
     ma,
@@ -1368,14 +1369,23 @@ def login():
         
         identifier = validated_data['identifier']
         password = validated_data['password']
+        
+        # Validate email format
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        is_email = re.match(email_pattern, identifier) is not None
             
-        # 1. Check Admin table (username based)
-        admin = Admin.query.filter_by(username=identifier).first()
+        # 1. Check Admin table (by email if email format, otherwise by username)
+        if is_email:
+            admin = Admin.query.filter_by(email=identifier).first()
+        else:
+            admin = Admin.query.filter_by(username=identifier).first()
+        
         if admin and check_password_hash(admin.password_hash, password):
             token = generate_token(
                 user_id=admin.id,
                 role="admin",
-                username=admin.username
+                username=admin.username,
+                email=admin.email
             )
             # Log successful authentication
             log_auth_event('login', True, identifier, admin.id, 'admin', request.remote_addr)
@@ -1385,11 +1395,12 @@ def login():
                 "role": "admin",
                 "user_id": admin.id,
                 "username": admin.username,
+                "email": admin.email,
                 "redirect_url": "admin/home.html"
             }), 200
             
-        # 2. Check Customer table (email or phone)
-        customer = Customer.query.filter((Customer.email == identifier) | (Customer.phone == identifier)).first()
+        # 2. Check Customer table (email only)
+        customer = Customer.query.filter_by(email=identifier).first()
         if customer and check_password_hash(customer.password_hash, password):
             token = generate_token(
                 user_id=customer.id,
@@ -1411,8 +1422,8 @@ def login():
                 "redirect_url": "customer/home.html"
             }), 200
             
-        # 3. Check Vendor table
-        vendor = Vendor.query.filter((Vendor.email == identifier) | (Vendor.phone == identifier)).first()
+        # 3. Check Vendor table (email only)
+        vendor = Vendor.query.filter_by(email=identifier).first()
         if vendor and check_password_hash(vendor.password_hash, password):
             token = generate_token(
                 user_id=vendor.id,
@@ -1444,8 +1455,8 @@ def login():
                 "redirect_url": redirect_url
             }), 200
             
-        # 4. Check Rider table
-        rider = Rider.query.filter((Rider.email == identifier) | (Rider.phone == identifier)).first()
+        # 4. Check Rider table (email only)
+        rider = Rider.query.filter_by(email=identifier).first()
         if rider and check_password_hash(rider.password_hash, password):
             token = generate_token(
                 user_id=rider.id,
@@ -1475,6 +1486,29 @@ def login():
                 "phone": rider.phone,
                 "verification_status": rider.verification_status,
                 "redirect_url": redirect_url
+            }), 200
+        
+        # 5. Check Support table (email only)
+        support = Support.query.filter_by(email=identifier).first()
+        if support and check_password_hash(support.password_hash, password):
+            token = generate_token(
+                user_id=support.id,
+                role="support",
+                username=support.username,
+                email=support.email,
+                phone=support.phone
+            )
+            # Log successful authentication
+            log_auth_event('login', True, identifier, support.id, 'support', request.remote_addr)
+            return jsonify({
+                "message": "Login successful",
+                "token": token,
+                "role": "support",
+                "user_id": support.id,
+                "username": support.username,
+                "email": support.email,
+                "phone": support.phone,
+                "redirect_url": "support/home.html"
             }), 200
 
         # Log failed authentication attempt

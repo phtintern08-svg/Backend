@@ -9,6 +9,7 @@ class Admin(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=True)  # Optional email for email-based login
     password_hash = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -586,6 +587,24 @@ class DeliveryLog(db.Model):
     
     def __repr__(self):
         return f'<DeliveryLog Order#{self.order_id} - Rider#{self.rider_id} - {self.status}>'
+
+class Support(db.Model):
+    __bind_key__ = 'support'
+    """Support staff model for support database"""
+    __tablename__ = 'support_staff'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    phone = db.Column(db.String(20), unique=True, nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f'<Support {self.username} - {self.email}>'
 
 class SupportTicket(db.Model):
     __bind_key__ = 'admin'

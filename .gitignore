@@ -1,6 +1,6 @@
 
 passenger_wsgi.py
-.env
+
 __pycache__/
 *.pyc
 instance/

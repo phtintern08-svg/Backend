@@ -1,0 +1,71 @@
+# Python Compiled Files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments
+venv/
+env/
+ENV/
+virtualenv/
+.venv
+env.bak/
+venv.bak/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# Flask
+instance/
+.webassets-cache
+
+# Database Files
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Python Logs
+*.log
+logs/
+*.log.*
+
+# Python Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+.pytest_cache/
+
+# Python Distribution / Packaging
+dist/
+build/
+*.egg-info/
+*.egg
+*.whl
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Python Version
+.python-version
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Backend Uploads
+uploads/
+temp/
+tmp/
+
+# Compiled Python Files
+*.pyc
+*.pyo
+*.pyd

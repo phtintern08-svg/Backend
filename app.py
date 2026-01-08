@@ -395,37 +395,37 @@ if warnings:
 # PRODUCTION ONLY: Tables should already exist (created via migrations or manual SQL)
 # Do NOT create tables at startup - this causes connection errors
 # Only create initial admin if environment variables are set
-# This is done lazily to avoid blocking app startup
+# CRITICAL: Run synchronously (NOT in background thread) to avoid session corruption
 def create_initial_admin_if_needed():
-    """Create initial admin if environment variables are set - called lazily"""
+    """Create initial admin if environment variables are set - runs synchronously at startup"""
     try:
         initial_admin_username = os.environ.get('INITIAL_ADMIN_USERNAME')
         initial_admin_password = os.environ.get('INITIAL_ADMIN_PASSWORD')
         
         if initial_admin_username and initial_admin_password:
-            with app.app_context():
-                try:
-                    if not Admin.query.filter_by(username=initial_admin_username).first():
-                        initial_admin = Admin(
-                            username=initial_admin_username,
-                            password_hash=generate_password_hash(initial_admin_password)
-                        )
-                        db.session.add(initial_admin)
-                        db.session.commit()
-                        log_info(f"Initial admin created from environment variables: {initial_admin_username}")
-                        # Clear environment variables after use for security
-                        os.environ.pop('INITIAL_ADMIN_USERNAME', None)
-                        os.environ.pop('INITIAL_ADMIN_PASSWORD', None)
-                except Exception as db_error:
-                    log_warning(f"Could not create initial admin - database may not be ready: {str(db_error)}")
+            try:
+                if not Admin.query.filter_by(username=initial_admin_username).first():
+                    initial_admin = Admin(
+                        username=initial_admin_username,
+                        password_hash=generate_password_hash(initial_admin_password)
+                    )
+                    db.session.add(initial_admin)
+                    db.session.commit()
+                    log_info(f"Initial admin created from environment variables: {initial_admin_username}")
+                    # Clear environment variables after use for security
+                    os.environ.pop('INITIAL_ADMIN_USERNAME', None)
+                    os.environ.pop('INITIAL_ADMIN_PASSWORD', None)
+            except Exception as db_error:
+                # Log to file only - no DB access in except blocks
+                app_logger.warning(f"Could not create initial admin - database may not be ready: {str(db_error)}")
     except Exception as e:
-        log_warning(f"Could not create initial admin: {str(e)}")
+        # Log to file only - no DB access in except blocks
+        app_logger.warning(f"Could not create initial admin: {str(e)}")
 
-# Schedule admin creation to run after app is fully initialized
-# Use a background thread to avoid blocking startup
+# Run admin creation synchronously after app initialization (NOT in background thread)
+# This ensures proper session management and prevents connection pool corruption
 import threading
-admin_init_thread = threading.Thread(target=create_initial_admin_if_needed, daemon=True)
-admin_init_thread.start()
+create_initial_admin_if_needed()
 
 import random
 import time
@@ -1026,25 +1026,25 @@ def login_post():
         
         if admin:
             if check_password_hash(admin.password_hash, password):
-            token = generate_token(
-                user_id=admin.id,
-                role="admin",
-                username=admin.username,
-                email=admin.email
-            )
-            # Log successful authentication
-            log_auth_event('login', True, identifier, admin.id, 'admin', request.remote_addr)
-            # Build full URL for admin redirect
-            admin_redirect_url = f"https://apparels.impromptuindian.com/admin/home.html"
-            response = jsonify({
-                "message": "Login successful",
-                "token": token,
-                "role": "admin",
-                "user_id": admin.id,
-                "username": admin.username,
-                "email": admin.email,
-                "redirect_url": admin_redirect_url
-            })
+                token = generate_token(
+                    user_id=admin.id,
+                    role="admin",
+                    username=admin.username,
+                    email=admin.email
+                )
+                # Log successful authentication
+                log_auth_event('login', True, identifier, admin.id, 'admin', request.remote_addr)
+                # Build full URL for admin redirect
+                admin_redirect_url = f"https://apparels.impromptuindian.com/admin/home.html"
+                response = jsonify({
+                    "message": "Login successful",
+                    "token": token,
+                    "role": "admin",
+                    "user_id": admin.id,
+                    "username": admin.username,
+                    "email": admin.email,
+                    "redirect_url": admin_redirect_url
+                })
                 response.headers['Content-Type'] = 'application/json'
                 return response, 200
             # Admin found but password wrong - return immediately (don't check other tables)
@@ -1057,27 +1057,27 @@ def login_post():
         customer = Customer.query.filter_by(email=identifier).first()
         if customer:
             if check_password_hash(customer.password_hash, password):
-            token = generate_token(
-                user_id=customer.id,
-                role="customer",
-                username=customer.username,
-                email=customer.email,
-                phone=customer.phone
-            )
-            # Log successful authentication
-            log_auth_event('login', True, identifier, customer.id, 'customer', request.remote_addr)
-            # Build full URL for customer redirect
-            customer_redirect_url = f"https://apparels.impromptuindian.com/customer/home.html"
-            response = jsonify({
-                "message": "Login successful",
-                "token": token,
-                "role": "customer",
-                "user_id": customer.id,
-                "username": customer.username,
-                "email": customer.email,
-                "phone": customer.phone,
-                "redirect_url": customer_redirect_url
-            })
+                token = generate_token(
+                    user_id=customer.id,
+                    role="customer",
+                    username=customer.username,
+                    email=customer.email,
+                    phone=customer.phone
+                )
+                # Log successful authentication
+                log_auth_event('login', True, identifier, customer.id, 'customer', request.remote_addr)
+                # Build full URL for customer redirect
+                customer_redirect_url = f"https://apparels.impromptuindian.com/customer/home.html"
+                response = jsonify({
+                    "message": "Login successful",
+                    "token": token,
+                    "role": "customer",
+                    "user_id": customer.id,
+                    "username": customer.username,
+                    "email": customer.email,
+                    "phone": customer.phone,
+                    "redirect_url": customer_redirect_url
+                })
                 response.headers['Content-Type'] = 'application/json'
                 return response, 200
             # Customer found but password wrong - return immediately
@@ -1090,28 +1090,28 @@ def login_post():
         vendor = Vendor.query.filter_by(email=identifier).first()
         if vendor:
             if check_password_hash(vendor.password_hash, password):
-            token = generate_token(
-                user_id=vendor.id,
-                role="vendor",
-                username=vendor.username,
-                email=vendor.email,
-                phone=vendor.phone
-            )
-            # Redirect to vendor subdomain home page
-            redirect_url = build_subdomain_url(Config.VENDOR_SUBDOMAIN, '/home.html')
-            # Log successful authentication
-            log_auth_event('login', True, identifier, vendor.id, 'vendor', request.remote_addr)
-            response = jsonify({
-                "message": "Login successful",
-                "token": token,
-                "role": "vendor",
-                "user_id": vendor.id,
-                "business_name": vendor.business_name,
-                "username": vendor.username,
-                "email": vendor.email,
-                "phone": vendor.phone,
-                "redirect_url": redirect_url
-            })
+                token = generate_token(
+                    user_id=vendor.id,
+                    role="vendor",
+                    username=vendor.username,
+                    email=vendor.email,
+                    phone=vendor.phone
+                )
+                # Redirect to vendor subdomain home page
+                redirect_url = build_subdomain_url(Config.VENDOR_SUBDOMAIN, '/home.html')
+                # Log successful authentication
+                log_auth_event('login', True, identifier, vendor.id, 'vendor', request.remote_addr)
+                response = jsonify({
+                    "message": "Login successful",
+                    "token": token,
+                    "role": "vendor",
+                    "user_id": vendor.id,
+                    "business_name": vendor.business_name,
+                    "username": vendor.username,
+                    "email": vendor.email,
+                    "phone": vendor.phone,
+                    "redirect_url": redirect_url
+                })
                 response.headers['Content-Type'] = 'application/json'
                 return response, 200
             # Vendor found but password wrong - return immediately
@@ -1124,28 +1124,28 @@ def login_post():
         rider = Rider.query.filter_by(email=identifier).first()
         if rider:
             if check_password_hash(rider.password_hash, password):
-            token = generate_token(
-                user_id=rider.id,
-                role="rider",
-                username=rider.name,
-                email=rider.email,
-                phone=rider.phone
-            )
-            # Redirect to rider subdomain home page
-            redirect_url = build_subdomain_url(Config.RIDER_SUBDOMAIN, '/home.html')
-            # Log successful authentication
-            log_auth_event('login', True, identifier, rider.id, 'rider', request.remote_addr)
-            response = jsonify({
-                "message": "Login successful",
-                "token": token,
-                "role": "rider",
-                "user_id": rider.id,
-                "username": rider.name,
-                "email": rider.email,
-                "phone": rider.phone,
-                "verification_status": rider.verification_status,
-                "redirect_url": redirect_url
-            })
+                token = generate_token(
+                    user_id=rider.id,
+                    role="rider",
+                    username=rider.name,
+                    email=rider.email,
+                    phone=rider.phone
+                )
+                # Redirect to rider subdomain home page
+                redirect_url = build_subdomain_url(Config.RIDER_SUBDOMAIN, '/home.html')
+                # Log successful authentication
+                log_auth_event('login', True, identifier, rider.id, 'rider', request.remote_addr)
+                response = jsonify({
+                    "message": "Login successful",
+                    "token": token,
+                    "role": "rider",
+                    "user_id": rider.id,
+                    "username": rider.name,
+                    "email": rider.email,
+                    "phone": rider.phone,
+                    "verification_status": rider.verification_status,
+                    "redirect_url": redirect_url
+                })
                 response.headers['Content-Type'] = 'application/json'
                 return response, 200
             # Rider found but password wrong - return immediately
@@ -1158,25 +1158,25 @@ def login_post():
         support = Support.query.filter_by(email=identifier).first()
         if support:
             if check_password_hash(support.password_hash, password):
-            token = generate_token(
-                user_id=support.id,
-                role="support",
-                username=support.username,
-                email=support.email,
-                phone=support.phone
-            )
-            # Log successful authentication
-            log_auth_event('login', True, identifier, support.id, 'support', request.remote_addr)
-            response = jsonify({
-                "message": "Login successful",
-                "token": token,
-                "role": "support",
-                "user_id": support.id,
-                "username": support.username,
-                "email": support.email,
-                "phone": support.phone,
-                "redirect_url": "support/home.html"
-            })
+                token = generate_token(
+                    user_id=support.id,
+                    role="support",
+                    username=support.username,
+                    email=support.email,
+                    phone=support.phone
+                )
+                # Log successful authentication
+                log_auth_event('login', True, identifier, support.id, 'support', request.remote_addr)
+                response = jsonify({
+                    "message": "Login successful",
+                    "token": token,
+                    "role": "support",
+                    "user_id": support.id,
+                    "username": support.username,
+                    "email": support.email,
+                    "phone": support.phone,
+                    "redirect_url": "support/home.html"
+                })
                 response.headers['Content-Type'] = 'application/json'
                 return response, 200
             # Support found but password wrong - return immediately
@@ -1380,12 +1380,14 @@ def send_otp():
                 
                 # Check if SMTP is configured
                 if not app.config.get('MAIL_USERNAME') or not app.config.get('MAIL_PASSWORD'):
-                    log_error(Exception("SMTP not configured"), {"recipient": recipient, "error_type": "SMTP_NOT_CONFIGURED"})
+                    # File-only logging - NO DB access
+                    app_logger.error("SMTP not configured", extra={"recipient": recipient, "error_type": "SMTP_NOT_CONFIGURED"})
                     response = jsonify({"error": "Email service is not configured. Please contact support."})
                     response.headers['Content-Type'] = 'application/json'
                     return response, 500
                 
                 # Send email in background thread to avoid blocking
+                # CRITICAL: Do NOT touch database/ORM in background threads - can resurrect closed sessions
                 def send_email_async():
                     try:
                         with app.app_context():
@@ -1395,25 +1397,20 @@ def send_otp():
                                 body=f'Your OTP code is: {otp}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this code, please ignore this email.\n\nBest regards,\nImpromptuIndian Team'
                             )
                             mail.send(msg)
-                            log_info(f"OTP email sent successfully to {recipient}", {
-                                "otp_sent": True,
-                                "recipient": recipient,
-                                "type": "email"
-                            })
+                            # Log to file only - do NOT touch database
+                            app_logger.info(f"OTP email sent successfully to {recipient}")
                     except Exception as email_err:
-                        log_error(email_err, {
-                            "recipient": recipient,
-                            "error_type": "EMAIL_SENDING_FAILED",
-                            "type": "email"
-                        })
-                        # Update OTP log status to failed
-                        try:
-                            otp_log = OTPLog.query.filter_by(recipient=recipient, otp_code=otp).order_by(OTPLog.created_at.desc()).first()
-                            if otp_log:
-                                otp_log.status = 'failed'
-                                db.session.commit()
-                        except Exception:
-                            db.session.rollback()
+                        # Log to file only - do NOT touch database or ORM
+                        app_logger.exception(
+                            "OTP email sending failed",
+                            extra={
+                                "recipient": recipient,
+                                "error_type": "EMAIL_SENDING_FAILED",
+                                "type": "email"
+                            }
+                        )
+                        # OTPLog status remains as 'sent' - we don't update it in background thread
+                        # This is acceptable - the OTP is still valid even if email delivery failed
                 
                 # Start email thread (non-blocking)
                 email_thread = threading.Thread(target=send_email_async)
@@ -1497,11 +1494,15 @@ def send_otp():
                 
         except Exception as send_err:
             # Log the error but still return success since OTP is generated and stored
-            log_error(send_err, {
-                "recipient": recipient,
-                "type": type_,
-                "error_type": "OTP_SENDING_ERROR"
-            })
+            # File-only logging - NO DB access in except blocks
+            app_logger.exception(
+                "OTP sending error",
+                extra={
+                    "recipient": recipient,
+                    "type": type_,
+                    "error_type": "OTP_SENDING_ERROR"
+                }
+            )
             response = jsonify({"message": f"OTP sent successfully to {recipient}"})
             response.headers['Content-Type'] = 'application/json'
             return response, 200
@@ -4428,7 +4429,8 @@ def auto_assign_rider(order):
         
     except Exception as e:
         db.session.rollback()
-        log_error(e, {"function": "assign_rider_proximity"})
+        # File-only logging - NO DB access in except blocks
+        app_logger.exception("assign_rider_proximity error", extra={"function": "assign_rider_proximity"})
         return False, "Failed to assign rider. Please try again."
 
 @app.route('/vendor/update-production-stage', methods=['POST'])
@@ -6193,7 +6195,8 @@ def assign_nearest_rider_to_order(order_id, vendor_id, max_search_radius_km=10):
             
     except Exception as e:
         db.session.rollback()
-        log_error(e, {"function": "admin_find_nearby_riders"})
+        # File-only logging - NO DB access in except blocks
+        app_logger.exception("admin_find_nearby_riders error", extra={"function": "admin_find_nearby_riders"})
         return {
             'success': False,
             'error': get_error_message(e, "Failed to find nearby riders. Please try again.")
@@ -6460,12 +6463,17 @@ def database_health_check():
             "timestamp": datetime.utcnow().isoformat()
         }), 503
 
-# CRITICAL: Teardown hook for safe session cleanup (ONLY place where session.remove() is allowed)
+# CRITICAL: Teardown hooks for safe session cleanup (ONLY place where session.remove() is allowed)
+# Both hooks ensure session cleanup in all scenarios (Passenger-safe, thread-safe, pool-safe)
 @app.teardown_appcontext
 def shutdown_session(exception=None):
-    """Safely remove database session after request completes"""
-    # This is the ONLY place where db.session.remove() should be called
-    # Passenger-safe, thread-safe, pool-safe
+    """Safely remove database session after application context ends"""
+    db.session.remove()
+
+@app.teardown_request
+def shutdown_session_per_request(exception=None):
+    """Safely remove database session after each request completes"""
+    # This prevents connection reuse corruption in Passenger workers
     db.session.remove()
 
 # Test endpoint to verify routing works

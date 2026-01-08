@@ -71,13 +71,8 @@ def receive_connect(dbapi_conn, connection_record):
     log_info("New database connection established")
 
 
-@event.listens_for(Pool, "checkout")
-def receive_checkout(dbapi_conn, connection_record, connection_proxy):
-    """Called when a connection is checked out from the pool"""
-    # pool_pre_ping is enabled in config, so SQLAlchemy automatically checks connections
-    # This handler is kept for logging purposes only
-    # If connection is dead, pool_pre_ping will automatically recreate it
-    pass
+# REMOVED: checkout handler - pool_pre_ping handles connection validation automatically
+# Having a custom checkout handler can interfere with connection pool management
 
 
 def check_database_health(engine):

@@ -968,43 +968,14 @@ def index():
 def apparels_index():
     return send_from_directory("../Frontend/apparels.impromptuindian.com", "index.html")
 
-# Serve any .html file directly to support legacy links (e.g. login.html)
-@app.route('/<path:page>.html')
-def serve_html_pages(page):
-    return send_from_directory('../Frontend/apparels.impromptuindian.com', f'{page}.html')
-
-@app.route("/about")
-def about():
-    return send_from_directory("../Frontend/apparels.impromptuindian.com", "about.html")
-
-@app.route("/blog")
-def blog():
-    return send_from_directory("../Frontend/apparels.impromptuindian.com", "blog.html")
-
-@app.route("/support")
-def support():
-    return send_from_directory("../Frontend/apparels.impromptuindian.com", "support.html")
-
-@app.route("/terms")
-def terms():
-    return send_from_directory("../Frontend/apparels.impromptuindian.com", "terms.html")
-
-@app.route("/login.html", methods=['GET']) # Serve login page HTML
-def login_page():
-    """Serve the login HTML page"""
-    return send_from_directory("../Frontend/apparels.impromptuindian.com", "login.html")
-
-@app.route("/login", methods=['GET', 'POST']) # Handle both GET (page) and POST (API)
+# CRITICAL: Login routes must be defined BEFORE catch-all routes to ensure proper matching
+@app.route("/login", methods=['POST'])  # POST route for authentication API
 @limiter.limit("5 per 15 minutes")
 @csrf.exempt  # Public endpoint - authentication handled via JWT tokens
-def login_handler():
-    """Handle both GET requests (serve page) and POST requests (authentication)"""
-    if request.method == 'GET':
-        return send_from_directory("../Frontend/apparels.impromptuindian.com", "login.html")
-    
-    # POST method - handle authentication
-    # Log that this endpoint was hit (for debugging)
-    app_logger.info(f"Login POST request received from {request.remote_addr} - Path: {request.path}, Method: {request.method}, URL: {request.url}")
+def login_post():
+    """Handle POST requests for authentication - CRITICAL: This route must match POST /login"""
+    # CRITICAL LOG: This confirms the route is being matched
+    app_logger.critical(f"=== LOGIN POST ROUTE HIT === Path: {request.path}, Method: {request.method}, URL: {request.url}, Remote: {request.remote_addr}")
     try:
         # Ensure we return JSON even on errors
         # Validate input data
@@ -1189,6 +1160,38 @@ def login_handler():
         response = jsonify({"error": error_message})
         response.headers['Content-Type'] = 'application/json'
         return response, 500
+
+# GET route for login page (must be after POST route)
+@app.route("/login", methods=['GET'])
+def login_get():
+    """Serve the login HTML page for GET requests"""
+    return send_from_directory("../Frontend/apparels.impromptuindian.com", "login.html")
+
+@app.route("/login.html", methods=['GET'])
+def login_page():
+    """Serve the login HTML page"""
+    return send_from_directory("../Frontend/apparels.impromptuindian.com", "login.html")
+
+# Serve any .html file directly to support legacy links (e.g. login.html)
+@app.route('/<path:page>.html')
+def serve_html_pages(page):
+    return send_from_directory('../Frontend/apparels.impromptuindian.com', f'{page}.html')
+
+@app.route("/about")
+def about():
+    return send_from_directory("../Frontend/apparels.impromptuindian.com", "about.html")
+
+@app.route("/blog")
+def blog():
+    return send_from_directory("../Frontend/apparels.impromptuindian.com", "blog.html")
+
+@app.route("/support")
+def support():
+    return send_from_directory("../Frontend/apparels.impromptuindian.com", "support.html")
+
+@app.route("/terms")
+def terms():
+    return send_from_directory("../Frontend/apparels.impromptuindian.com", "terms.html")
 
 @app.route("/register")
 def register():

@@ -106,9 +106,11 @@ class Config:
     }
     
     # Session Configuration
-    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
+    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'true').lower() == 'true' if ENV == 'production' else os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
     SESSION_COOKIE_HTTPONLY = os.environ.get('SESSION_COOKIE_HTTPONLY', 'true').lower() == 'true'
-    SESSION_COOKIE_SAMESITE = os.environ.get('SESSION_COOKIE_SAMESITE', 'Lax')
+    SESSION_COOKIE_SAMESITE = os.environ.get('SESSION_COOKIE_SAMESITE', 'None' if ENV == 'production' else 'Lax')
+    # Cross-subdomain cookie support - set domain to allow cookies across subdomains
+    SESSION_COOKIE_DOMAIN = os.environ.get('SESSION_COOKIE_DOMAIN', f'.{BASE_DOMAIN}' if ENV == 'production' else None)
     
     # Session Timeout Configuration (in seconds)
     # Default: 30 minutes (1800 seconds) - can be overridden via environment variable

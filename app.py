@@ -15,6 +15,7 @@ from flask_cors import CORS
 from flask_mail import Mail, Message
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_limiter.errors import RateLimitExceeded
 from flask_wtf.csrf import CSRFProtect, generate_csrf, validate_csrf
 from wtforms.csrf.session import SessionCSRF
 import requests
@@ -118,6 +119,12 @@ app.config.from_object(Config)
 
 # Apply ProxyFix for proper header handling (X-Forwarded-Proto, etc.) behind Nginx/ELB
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
+# Configure session cookies for cross-subdomain support
+if Config.ENV == 'production' and Config.SESSION_COOKIE_DOMAIN:
+    app.config['SESSION_COOKIE_DOMAIN'] = Config.SESSION_COOKIE_DOMAIN
+    app.config['SESSION_COOKIE_SAMESITE'] = Config.SESSION_COOKIE_SAMESITE
+    app.config['SESSION_COOKIE_SECURE'] = Config.SESSION_COOKIE_SECURE
 
 # Use absolute path for uploads (BASE_DIR already defined above)
 app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, '../Frontend/apparels.impromptuindian.com/uploads')
@@ -322,9 +329,21 @@ def not_found(error):
     # For other routes, let Flask handle normally (for serving HTML pages)
     return error
 
+@app.errorhandler(RateLimitExceeded)
+def handle_rate_limit(e):
+    """Handle rate limit errors - return 429 instead of 500"""
+    response = jsonify({
+        "error": "Too many login attempts. Please wait before trying again."
+    })
+    response.headers['Content-Type'] = 'application/json'
+    return response, 429
+
 @app.errorhandler(500)
 def internal_error(error):
     """Handle 500 errors - return JSON for API routes"""
+    # Don't convert RateLimitExceeded to 500
+    if isinstance(error, RateLimitExceeded):
+        raise error
     if expects_json():
         log_error(error, {"endpoint": request.path, "method": request.method})
         response = jsonify({"error": "Internal server error. Please try again later."})
@@ -336,6 +355,9 @@ def internal_error(error):
 @app.errorhandler(Exception)
 def handle_all_exceptions(error):
     """Catch-all error handler for unhandled exceptions"""
+    # Don't convert RateLimitExceeded to 500
+    if isinstance(error, RateLimitExceeded):
+        raise error
     if expects_json():
         log_error(error, {"endpoint": request.path, "method": request.method})
         response = jsonify({"error": "An unexpected error occurred. Please try again later."})
@@ -349,10 +371,10 @@ def handle_all_exceptions(error):
 # CORS is kept for browsers that don't support JSONP or for same-origin requests
 if Config.ENV == 'production':
     # In production, restrict CORS to allowed origins only
-    # JSONP will handle cross-origin requests via callback parameter
+    # Enable credentials support for cross-subdomain cookie sharing
     CORS(app, 
          resources={r"/*": {"origins": Config.ALLOWED_ORIGINS}},
-         supports_credentials=False,  # JSONP doesn't support credentials
+         supports_credentials=True,  # Enable credentials for cross-subdomain cookies
          allow_headers=["Content-Type", "Authorization", "X-CSRFToken"],
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
          expose_headers=["Content-Type"])
@@ -984,7 +1006,7 @@ def apparels_index():
 
 # CRITICAL: Login routes must be defined BEFORE catch-all routes to ensure proper matching
 @app.route("/login", methods=['POST'])  # POST route for authentication API
-#@limiter.limit("20 per minute")
+@limiter.limit("5 per 15 minute")  # Rate limit: 5 login attempts per 15 minutes
 @csrf.exempt  # Public endpoint - authentication handled via JWT tokens
 def login_post():
     """Handle POST requests for authentication - CRITICAL: This route must match POST /login"""
@@ -1150,7 +1172,19 @@ def login_post():
             return response, 401
         
         # 5. Check Support table (email only) - only if rider not found
-        support = Support.query.filter_by(email=identifier).first()
+        # Wrap in try-except to handle case where support_staff table doesn't exist
+        support = None
+        try:
+            support = Support.query.filter_by(email=identifier).first()
+        except Exception as db_error:
+            # If support table doesn't exist, log and continue (don't crash)
+            error_type = type(db_error).__name__
+            if 'OperationalError' in error_type or 'Table' in str(db_error) or 'doesn\'t exist' in str(db_error):
+                app_logger.warning(f"Support table not available: {str(db_error)}")
+            else:
+                # Re-raise if it's a different error
+                raise
+        
         if support:
             if check_password_hash(support.password_hash, password):
                 token = generate_token(
@@ -1329,7 +1363,7 @@ def admin_otp_logs_page():
     return send_from_directory("../Frontend/apparels.impromptuindian.com/admin", "otp-logs.html")
 
 @app.route('/send-otp', methods=['POST'])
-@limiter.limit("3 per hour", key_func=get_otp_recipient)
+#@limiter.limit("3 per hour", key_func=get_otp_recipient)
 @csrf.exempt  # Public endpoint
 def send_otp():
     try:

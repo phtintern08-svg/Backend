@@ -984,7 +984,7 @@ def apparels_index():
 
 # CRITICAL: Login routes must be defined BEFORE catch-all routes to ensure proper matching
 @app.route("/login", methods=['POST'])  # POST route for authentication API
-@limiter.limit("5 per 15 minutes")
+@limiter.limit("20 per minute")
 @csrf.exempt  # Public endpoint - authentication handled via JWT tokens
 def login_post():
     """Handle POST requests for authentication - CRITICAL: This route must match POST /login"""

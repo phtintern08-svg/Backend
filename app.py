@@ -288,11 +288,11 @@ def log_request_details():
 
 # Helper function to check if request expects JSON response
 def expects_json():
-    """Check if the request expects a JSON response"""
-    # API endpoints that should always return JSON
+    """Check if the request expects a JSON response - API routes must NEVER return HTML"""
+    # API endpoints that should always return JSON (never HTML redirects)
     api_endpoints = [
         '/login', '/register', '/send-otp', '/verify-otp',
-        '/api/', '/admin/otp-logs', '/admin/view-otp-logs'
+        '/api/', '/admin/', '/rider/', '/vendor/', '/customer/'
     ]
     
     # Check if path matches any API endpoint
@@ -300,12 +300,18 @@ def expects_json():
         if request.path.startswith(endpoint):
             return True
     
-    # Check if it's a POST request with JSON content type
-    if request.method == 'POST' and request.content_type and 'application/json' in request.content_type:
+    # Check if request has Authorization header (API request with JWT token)
+    if request.headers.get('Authorization'):
         return True
     
+    # Check if it's a POST/PUT/DELETE/PATCH request with JSON content type
+    if request.method in ['POST', 'PUT', 'DELETE', 'PATCH']:
+        if request.content_type and 'application/json' in request.content_type:
+            return True
+    
     # Check if Accept header requests JSON
-    if request.headers.get('Accept', '').startswith('application/json'):
+    accept_header = request.headers.get('Accept', '')
+    if accept_header and 'application/json' in accept_header:
         return True
     
     return False
@@ -1148,8 +1154,8 @@ def login_post():
                     email=rider.email,
                     phone=rider.phone
                 )
-                # Redirect to rider subdomain home page
-                redirect_url = build_subdomain_url(Config.RIDER_SUBDOMAIN, '/home.html')
+                # Redirect to rider subdomain home page (relative path - login.js handles domain)
+                redirect_url = '/home.html'
                 # Log successful authentication
                 log_auth_event('login', True, identifier, rider.id, 'rider', request.remote_addr)
                 response = jsonify({
